@@ -100,6 +100,27 @@ div[data-testid="metric-container"] > div[data-testid="deltaRow"] > div[data-tes
 """, unsafe_allow_html=True)
 
 # --- Cached wrapper functions for market sentiment (defined at top level to avoid redefinition) ---
+import concurrent.futures
+
+def _run_with_timeout(func, args=(), kwargs=None, timeout=180):
+    """Run a function with a timeout. Returns None on timeout or error."""
+    if kwargs is None:
+        kwargs = {}
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func, *args, **kwargs)
+            try:
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                print(f"Timeout running {func.__name__}")
+                return None
+            except Exception as e:
+                print(f"Error running {func.__name__}: {e}")
+                return None
+    except Exception as e:
+        print(f"Error in timeout wrapper: {e}")
+        return None
+
 @st.cache_data(ttl=1800)  # Cache for 30 minutes
 def cached_sentiment(start_date, end_date):
     from market_sentiment.sentiment import sentiment
@@ -113,12 +134,22 @@ def cached_volatility(symbol, end_date, countback, forecast_days=0):
 @st.cache_data(ttl=1800)
 def cached_high_low_index(start_date, end_date):
     from market_sentiment.sentiment import high_low_index
-    return high_low_index(start_date, end_date)
+    try:
+        result = high_low_index(start_date, end_date)
+        return result if result is not None else pd.DataFrame()
+    except Exception as e:
+        print(f"Error in cached_high_low_index: {e}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
 def cached_bpi(start_date, end_date):
     from market_sentiment.sentiment import bpi
-    return bpi(start_date, end_date)
+    try:
+        result = bpi(start_date, end_date)
+        return result if result is not None else pd.DataFrame()
+    except Exception as e:
+        print(f"Error in cached_bpi: {e}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
 def cached_ma(start_date, end_date):
@@ -339,45 +370,48 @@ def render_highlow_fragment(hl_key, start_date_str, end_date_str):
             st.info("Đang tải dữ liệu High-Low Index...")
         elif status == "error":
             st.error(f"Lỗi khi tải dữ liệu High-Low Index: {data}")
-        elif status == "completed" and data is not None and not data.empty:
-            import pandas as pd
-            import plotly.graph_objects as go
-            
-            data['time'] = pd.to_datetime(data['time'])
-            
-            fig_hl = go.Figure()
-            if 'hl_index' in data.columns:
-                fig_hl.add_trace(go.Scatter(
-                    x=data['time'], y=data['hl_index'], mode='lines',
-                    name='HL Index', line=dict(color='#1f77b4')
-                ))
-            
-            shapes = [
-                {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y', 'y0': 30, 'y1': 30, 'line': {'color': 'green', 'width': 1, 'dash': 'dash'}},
-                {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y', 'y0': 70, 'y1': 70, 'line': {'color': 'red', 'width': 1, 'dash': 'dash'}}
-            ]
-            fig_hl.update_layout(
-                title=f'High-Low Index Historical ({start_date_str} to {end_date_str})',
-                xaxis_title='Date', yaxis=dict(title='Index Value', showgrid=False),
-                height=350, hovermode='x unified', showlegend=False,
-                margin=dict(l=20, r=20, t=40, b=20), shapes=shapes,
-                annotations=[
-                    dict(x=0.98, y=70, xref="paper", yref="y", text="Overbought", showarrow=False, xanchor="right", font=dict(color="red", size=12)),
-                    dict(x=0.98, y=30, xref="paper", yref="y", text="Oversold", showarrow=False, xanchor="right", font=dict(color="green", size=12))
+        elif status == "completed":
+            if data is None or (hasattr(data, 'empty') and data.empty):
+                st.warning("Không có dữ liệu High-Low Index. Có thể API không khả dụng từ máy chủ deployed.")
+            else:
+                import pandas as pd
+                import plotly.graph_objects as go
+                
+                data['time'] = pd.to_datetime(data['time'])
+                
+                fig_hl = go.Figure()
+                if 'hl_index' in data.columns:
+                    fig_hl.add_trace(go.Scatter(
+                        x=data['time'], y=data['hl_index'], mode='lines',
+                        name='HL Index', line=dict(color='#1f77b4')
+                    ))
+                
+                shapes = [
+                    {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y', 'y0': 30, 'y1': 30, 'line': {'color': 'green', 'width': 1, 'dash': 'dash'}},
+                    {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y', 'y0': 70, 'y1': 70, 'line': {'color': 'red', 'width': 1, 'dash': 'dash'}}
                 ]
-            )
-            fig_hl.update_xaxes(showgrid=False)
-            st.plotly_chart(fig_hl, width='stretch')
-            
-            if f"{hl_key}_start_time" in st.session_state:
-                loading_time_key = f"{hl_key}_loading_time"
-                if loading_time_key not in st.session_state:
-                    st.session_state[loading_time_key] = time.time() - st.session_state[f"{hl_key}_start_time"]
-                st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
-            
-            with st.expander("📊 Xem dữ liệu High-Low Index chi tiết"):
-                st.dataframe(data, width='stretch')
-                st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"highlow_{start_date_str}_{end_date_str}.csv", "text/csv")
+                fig_hl.update_layout(
+                    title=f'High-Low Index Historical ({start_date_str} to {end_date_str})',
+                    xaxis_title='Date', yaxis=dict(title='Index Value', showgrid=False),
+                    height=350, hovermode='x unified', showlegend=False,
+                    margin=dict(l=20, r=20, t=40, b=20), shapes=shapes,
+                    annotations=[
+                        dict(x=0.98, y=70, xref="paper", yref="y", text="Overbought", showarrow=False, xanchor="right", font=dict(color="red", size=12)),
+                        dict(x=0.98, y=30, xref="paper", yref="y", text="Oversold", showarrow=False, xanchor="right", font=dict(color="green", size=12))
+                    ]
+                )
+                fig_hl.update_xaxes(showgrid=False)
+                st.plotly_chart(fig_hl, width='stretch')
+                
+                if f"{hl_key}_start_time" in st.session_state:
+                    loading_time_key = f"{hl_key}_loading_time"
+                    if loading_time_key not in st.session_state:
+                        st.session_state[loading_time_key] = time.time() - st.session_state[f"{hl_key}_start_time"]
+                    st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
+                
+                with st.expander("📊 Xem dữ liệu High-Low Index chi tiết"):
+                    st.dataframe(data, width='stretch')
+                    st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"highlow_{start_date_str}_{end_date_str}.csv", "text/csv")
         else:
             st.info("Đang tải dữ liệu High-Low Index tự động (mặc định 6 tháng)...")
 
@@ -393,41 +427,44 @@ def render_bpi_fragment(bpi_key, start_date_str, end_date_str):
             st.info("Đang tải dữ liệu BPI...")
         elif status == "error":
             st.error(f"Lỗi khi tải dữ liệu BPI: {data}")
-        elif status == "completed" and data is not None and not data.empty:
-            import pandas as pd
-            import plotly.graph_objects as go
-            
-            data['time'] = pd.to_datetime(data['time'])
-            
-            fig_bpi = go.Figure()
-            if 'bpi' in data.columns:
-                fig_bpi.add_trace(go.Scatter(
-                    x=data['time'], y=data['bpi'], mode='lines',
-                    name='BPI', line=dict(color='#1f77b4')
-                ))
-            
-            fig_bpi.add_hline(y=70, line_dash="dash", line_color="red")
-            fig_bpi.add_hline(y=30, line_dash="dash", line_color="green")
-            fig_bpi.add_annotation(x=0.98, y=70, xref="paper", yref="y", text="Overbought", showarrow=False, xanchor="right", font=dict(color="red", size=12))
-            fig_bpi.add_annotation(x=0.98, y=30, xref="paper", yref="y", text="Oversold", showarrow=False, xanchor="right", font=dict(color="green", size=12))
-            
-            fig_bpi.update_layout(
-                title=f'Bullish Percent Index Historical ({start_date_str} to {end_date_str})',
-                xaxis_title='Date', yaxis_title='BPI (%)',
-                height=350, hovermode='x unified', showlegend=False,
-                yaxis=dict(range=[0, 100]), margin=dict(l=20, r=20, t=40, b=20)
-            )
-            st.plotly_chart(fig_bpi, width='stretch')
-            
-            if f"{bpi_key}_start_time" in st.session_state:
-                loading_time_key = f"{bpi_key}_loading_time"
-                if loading_time_key not in st.session_state:
-                    st.session_state[loading_time_key] = time.time() - st.session_state[f"{bpi_key}_start_time"]
-                st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
-            
-            with st.expander("📊 Xem dữ liệu BPI chi tiết"):
-                st.dataframe(data, width='stretch')
-                st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"bpi_{start_date_str}_{end_date_str}.csv", "text/csv")
+        elif status == "completed":
+            if data is None or (hasattr(data, 'empty') and data.empty):
+                st.warning("Không có dữ liệu BPI. Có thể API không khả dụng từ máy chủ deployed.")
+            else:
+                import pandas as pd
+                import plotly.graph_objects as go
+                
+                data['time'] = pd.to_datetime(data['time'])
+                
+                fig_bpi = go.Figure()
+                if 'bpi' in data.columns:
+                    fig_bpi.add_trace(go.Scatter(
+                        x=data['time'], y=data['bpi'], mode='lines',
+                        name='BPI', line=dict(color='#1f77b4')
+                    ))
+                
+                fig_bpi.add_hline(y=70, line_dash="dash", line_color="red")
+                fig_bpi.add_hline(y=30, line_dash="dash", line_color="green")
+                fig_bpi.add_annotation(x=0.98, y=70, xref="paper", yref="y", text="Overbought", showarrow=False, xanchor="right", font=dict(color="red", size=12))
+                fig_bpi.add_annotation(x=0.98, y=30, xref="paper", yref="y", text="Oversold", showarrow=False, xanchor="right", font=dict(color="green", size=12))
+                
+                fig_bpi.update_layout(
+                    title=f'Bullish Percent Index Historical ({start_date_str} to {end_date_str})',
+                    xaxis_title='Date', yaxis_title='BPI (%)',
+                    height=350, hovermode='x unified', showlegend=False,
+                    yaxis=dict(range=[0, 100]), margin=dict(l=20, r=20, t=40, b=20)
+                )
+                st.plotly_chart(fig_bpi, width='stretch')
+                
+                if f"{bpi_key}_start_time" in st.session_state:
+                    loading_time_key = f"{bpi_key}_loading_time"
+                    if loading_time_key not in st.session_state:
+                        st.session_state[loading_time_key] = time.time() - st.session_state[f"{bpi_key}_start_time"]
+                    st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
+                
+                with st.expander("📊 Xem dữ liệu BPI chi tiết"):
+                    st.dataframe(data, width='stretch')
+                    st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"bpi_{start_date_str}_{end_date_str}.csv", "text/csv")
         else:
             st.info("Đang tải dữ liệu BPI tự động (mặc định 6 tháng)...")
 

@@ -311,23 +311,26 @@ def high_low_index(start_date, end_date=None):
         except Exception:
             return None
     
-    # Sử dụng ThreadPoolExecutor với số lượng worker lớn hơn để tối ưu
-    max_workers = min(50, len(hose_list))  # Tăng số worker lên 50 để tải song song nhiều hơn
+    # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
+    max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tất cả các task cùng lúc
         futures = {executor.submit(process_stock, symbol, start, end): symbol for symbol in hose_list}
         
-        # Thu thập kết quả khi hoàn thành
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                local_peaks, local_troughs = result
-                # Thread-safe update of counters
-                with counts_lock:
-                    for date in local_peaks:
-                        peak_counts[date] += 1
-                    for date in local_troughs:
-                        trough_counts[date] += 1
+        # Thu thập kết quả khi hoàn thành với timeout
+        for future in as_completed(futures, timeout=120):  # 2 minute timeout
+            try:
+                result = future.result(timeout=30)  # 30 second timeout per stock
+                if result:
+                    local_peaks, local_troughs = result
+                    # Thread-safe update of counters
+                    with counts_lock:
+                        for date in local_peaks:
+                            peak_counts[date] += 1
+                        for date in local_troughs:
+                            trough_counts[date] += 1
+            except Exception:
+                continue  # Skip failed stocks
 
     # Tạo DataFrame kết quả
     all_dates = sorted(set(list(peak_counts.keys()) + list(trough_counts.keys())))
@@ -521,20 +524,23 @@ def bpi(start_date, end_date=None):
         except Exception:
             return None
     
-    # Sử dụng ThreadPoolExecutor với số lượng worker lớn hơn
-    max_workers = min(50, len(hose_list))  # Tăng số worker lên 50 để tải song song nhiều hơn
+    # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
+    max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tất cả các task cùng lúc
         futures = {executor.submit(process_stock_for_bpi, symbol, start_date_dt, end_date_dt): symbol for symbol in hose_list}
         
-        # Xử lý kết quả khi các task hoàn thành
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                # Thread-safe update of counter
-                with counter_lock:
-                    for date in result:
-                        date_counter[date] += 1
+        # Xử lý kết quả khi các task hoàn thành với timeout
+        for future in as_completed(futures, timeout=120):  # 2 minute timeout
+            try:
+                result = future.result(timeout=30)  # 30 second timeout per stock
+                if result:
+                    # Thread-safe update of counter
+                    with counter_lock:
+                        for date in result:
+                            date_counter[date] += 1
+            except Exception:
+                continue  # Skip failed stocks
     
     # Tạo DataFrame từ Counter
     if not date_counter:

@@ -89,14 +89,24 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
     }
 
     session = _get_session()
-    response = session.get(url, headers=headers, timeout=15)
-    
-    if response.status_code != 200:
-        print(f"Error: {response.status_code}")
-        return pd.DataFrame()
-    
     try:
-        data = response.json()['data']
+        response = session.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            return pd.DataFrame()
+        
+        # Check if response has content
+        if not response.text or response.text.strip() == '':
+            return pd.DataFrame()
+        
+        json_data = response.json()
+        if not json_data or 'data' not in json_data:
+            return pd.DataFrame()
+        
+        data = json_data['data']
+        if not data:
+            return pd.DataFrame()
+        
         df = pd.DataFrame(data)
         df.drop(['symbol', 'accumulatedVolume', 'accumulatedValue', 'minBatchTruncTime'], axis=1, inplace=True, errors='ignore')
         df = df.rename(columns={'t': 'time', 'c': 'close', 'o': 'open', 'h': 'high', 'l': 'low', 'v': 'volume'})
@@ -108,14 +118,32 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
         _cache_timestamps[cache_key] = time.time()
         
         return df
-    except:
-        print(f"Error parsing response")
+    except Exception as e:
+        # Silent fail - return empty DataFrame
         return pd.DataFrame()
 
 # Cache for stock symbols - using a simple dict cache with TTL-like behavior
 _symbols_cache = None
 _symbols_cache_time = 0
 _SYMBOLS_CACHE_TTL = 300  # 5 minutes cache TTL
+
+# Fallback list of popular HOSE stocks in case API fails
+_HOSE_FALLBACK = [
+    'ACB', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'MBB',
+    'MSN', 'MWG', 'NVL', 'PDR', 'PLX', 'POW', 'REE', 'SAB', 'SSI', 'STB',
+    'TCB', 'VCB', 'VHM', 'VIB', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE', 'ANV',
+    'APG', 'ASM', 'BCG', 'BMP', 'BSI', 'BWE', 'CII', 'CMG', 'CRE', 'CTS',
+    'DBC', 'DCM', 'DGC', 'DHC', 'DIG', 'DPG', 'DPM', 'DRC', 'DXG', 'EIB',
+    'FIT', 'FLC', 'FRT', 'FTS', 'GEG', 'GEX', 'GMD', 'HAG', 'HAH', 'HBC',
+    'HCM', 'HDC', 'HHS', 'HNG', 'HPG', 'HPX', 'HSG', 'HT1', 'HVG', 'KDC',
+    'KDH', 'KOS', 'KQB', 'L14', 'LDG', 'MCH', 'MCG', 'MSH', 'NBB', 'NKG',
+    'NLG', 'NT2', 'NTL', 'OCB', 'PC1', 'PGB', 'PGC', 'PNJ', 'PPC', 'PVT',
+    'PVD', 'PVS', 'QCG', 'RGC', 'SBT', 'SCS', 'SGC', 'SGN', 'SHI', 'SIP',
+    'SKG', 'SMB', 'SMT', 'SRD', 'SSB', 'SSC', 'STK', 'SZC', 'TAC', 'TCI',
+    'TDM', 'TNG', 'TPB', 'TTB', 'TV2', 'TVB', 'VCA', 'VCF', 'VCI', 'VDS',
+    'VGC', 'VHC', 'VIB', 'VND', 'VNE', 'VNI', 'VNP', 'VOS', 'VPI', 'VSC',
+    'VSH', 'VTO', 'YEG'
+]
 
 def get_stock_symbols(exchange="HOSE"):
     """Get stock symbols list with caching to avoid repeated API calls."""
@@ -139,25 +167,25 @@ def get_stock_symbols(exchange="HOSE"):
     
     session = _get_session()
     try:
-        response = session.post(url, headers=headers, data=payload, timeout=15)
+        response = session.post(url, headers=headers, data=payload, timeout=10)
         if response.status_code != 200:
-            print(f"Error fetching stock symbols: HTTP {response.status_code}")
-            return _symbols_cache if _symbols_cache is not None else []
+            print(f"Error fetching stock symbols: HTTP {response.status_code}, using fallback list")
+            return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
         
         # Check if response has content
         if not response.text or response.text.strip() == '':
-            print("Error: Empty response from API")
-            return _symbols_cache if _symbols_cache is not None else []
+            print("Error: Empty response from API, using fallback list")
+            return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
         
         json_data = response.json()
         if not json_data:
-            print("Error: Empty JSON response")
-            return _symbols_cache if _symbols_cache is not None else []
+            print("Error: Empty JSON response, using fallback list")
+            return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
         
         data = pd.DataFrame(json_data)
         if data.empty or 's' not in data.columns:
-            print("Error: No symbol data found")
-            return _symbols_cache if _symbols_cache is not None else []
+            print("Error: No symbol data found, using fallback list")
+            return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
         
         result = data['s'].sort_values().tolist()
         # Only cache successful results
@@ -165,11 +193,11 @@ def get_stock_symbols(exchange="HOSE"):
         _symbols_cache_time = current_time
         return result
     except json.JSONDecodeError as e:
-        print(f"JSON decode error: {e}")
-        return _symbols_cache if _symbols_cache is not None else []
+        print(f"JSON decode error: {e}, using fallback list")
+        return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
     except Exception as e:
-        print(f"Error fetching stock symbols: {e}")
-        return _symbols_cache if _symbols_cache is not None else []
+        print(f"Error fetching stock symbols: {e}, using fallback list")
+        return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
 
 def investor_type(symbol='VN-Index', start_date=None, end_date=None):
     """
