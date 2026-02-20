@@ -167,7 +167,7 @@ def render_sentiment_fragment(sent_key, start_date_str, end_date_str):
                 height=300, hovermode='x unified', showlegend=False,
                 margin=dict(l=20, r=20, t=40, b=20)
             )
-            st.plotly_chart(fig_vnindex, use_container_width=True)
+            st.plotly_chart(fig_vnindex, width='stretch')
             
             st.subheader("🎯 Ngưỡng Tâm lý Thị trường")
             cols = st.columns(5)
@@ -229,7 +229,7 @@ def render_sentiment_fragment(sent_key, start_date_str, end_date_str):
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 margin=dict(l=20, r=20, t=40, b=60)
             )
-            st.plotly_chart(fig_sent, use_container_width=True)
+            st.plotly_chart(fig_sent, width='stretch')
             
             if f"{sent_key}_start_time" in st.session_state:
                 loading_time_key = f"{sent_key}_loading_time"
@@ -239,7 +239,7 @@ def render_sentiment_fragment(sent_key, start_date_str, end_date_str):
             
             if data is not None and not data.empty:
                 with st.expander("📊 Xem dữ liệu tâm lý thị trường chi tiết"):
-                    st.dataframe(data, use_container_width=True)
+                    st.dataframe(data, width='stretch')
                     st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"sentiment_{start_date_str}_{end_date_str}.csv", "text/csv")
         else:
             st.info("Đang tải dữ liệu tâm lý thị trường tự động (mặc định 6 tháng)...")
@@ -311,7 +311,7 @@ def render_volatility_fragment(vol_key, forecast_days, show_forecast, start_date
                 )
                 fig_vol.update_yaxes(title_text="VNINDEX Price", secondary_y=False, showgrid=False)
                 fig_vol.update_yaxes(title_text="Volatility", secondary_y=True, showgrid=False, range=[0, 0.06])
-                st.plotly_chart(fig_vol, use_container_width=True)
+                st.plotly_chart(fig_vol, width='stretch')
                 
                 if f"{vol_key}_start_time" in st.session_state:
                     loading_time_key = f"{vol_key}_loading_time"
@@ -320,7 +320,7 @@ def render_volatility_fragment(vol_key, forecast_days, show_forecast, start_date
                     st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
                 
                 with st.expander("📊 Xem dữ liệu biến động chi tiết"):
-                    st.dataframe(data, use_container_width=True)
+                    st.dataframe(data, width='stretch')
                     st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"volatility_{start_date}_{end_date}.csv", "text/csv")
             else:
                 st.error("Không tìm thấy cột dữ liệu biến động.")
@@ -367,7 +367,7 @@ def render_highlow_fragment(hl_key, start_date_str, end_date_str):
                 ]
             )
             fig_hl.update_xaxes(showgrid=False)
-            st.plotly_chart(fig_hl, use_container_width=True)
+            st.plotly_chart(fig_hl, width='stretch')
             
             if f"{hl_key}_start_time" in st.session_state:
                 loading_time_key = f"{hl_key}_loading_time"
@@ -376,7 +376,7 @@ def render_highlow_fragment(hl_key, start_date_str, end_date_str):
                 st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
             
             with st.expander("📊 Xem dữ liệu High-Low Index chi tiết"):
-                st.dataframe(data, use_container_width=True)
+                st.dataframe(data, width='stretch')
                 st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"highlow_{start_date_str}_{end_date_str}.csv", "text/csv")
         else:
             st.info("Đang tải dữ liệu High-Low Index tự động (mặc định 6 tháng)...")
@@ -417,7 +417,7 @@ def render_bpi_fragment(bpi_key, start_date_str, end_date_str):
                 height=350, hovermode='x unified', showlegend=False,
                 yaxis=dict(range=[0, 100]), margin=dict(l=20, r=20, t=40, b=20)
             )
-            st.plotly_chart(fig_bpi, use_container_width=True)
+            st.plotly_chart(fig_bpi, width='stretch')
             
             if f"{bpi_key}_start_time" in st.session_state:
                 loading_time_key = f"{bpi_key}_loading_time"
@@ -426,7 +426,7 @@ def render_bpi_fragment(bpi_key, start_date_str, end_date_str):
                 st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
             
             with st.expander("📊 Xem dữ liệu BPI chi tiết"):
-                st.dataframe(data, use_container_width=True)
+                st.dataframe(data, width='stretch')
                 st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"bpi_{start_date_str}_{end_date_str}.csv", "text/csv")
         else:
             st.info("Đang tải dữ liệu BPI tự động (mặc định 6 tháng)...")
@@ -530,7 +530,7 @@ def render_ma_fragment(ma_key, start_date_str, end_date_str):
                 showticklabels=True
             )
             fig_ma.update_yaxes(title_text="Price")
-            st.plotly_chart(fig_ma, use_container_width=True)
+            st.plotly_chart(fig_ma, width='stretch')
             
             if f"{ma_key}_start_time" in st.session_state:
                 loading_time_key = f"{ma_key}_loading_time"
@@ -539,7 +539,7 @@ def render_ma_fragment(ma_key, start_date_str, end_date_str):
                 st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
             
             with st.expander("📊 Xem dữ liệu MA chi tiết"):
-                st.dataframe(ma_df, use_container_width=True)
+                st.dataframe(ma_df, width='stretch')
                 st.download_button("Tải xuống dữ liệu CSV", ma_df.to_csv(index=False), f"ma_{start_date_str}_{end_date_str}.csv", "text/csv")
         else:
             st.info("Đang tải dữ liệu MA tự động (mặc định 6 tháng)...")
@@ -587,7 +587,7 @@ def render_breadth_fragment(bread_key, start_date_str, end_date_str):
                 shapes=shapes
             )
             fig_bread.update_xaxes(showgrid=False)
-            st.plotly_chart(fig_bread, use_container_width=True)
+            st.plotly_chart(fig_bread, width='stretch')
             
             if f"{bread_key}_start_time" in st.session_state:
                 loading_time_key = f"{bread_key}_loading_time"
@@ -596,7 +596,7 @@ def render_breadth_fragment(bread_key, start_date_str, end_date_str):
                 st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
             
             with st.expander("📊 Xem dữ liệu độ rộng thị trường chi tiết"):
-                st.dataframe(data, use_container_width=True)
+                st.dataframe(data, width='stretch')
                 st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"breadth_{start_date_str}_{end_date_str}.csv", "text/csv")
         else:
             st.info("Đang tải dữ liệu độ rộng thị trường tự động (mặc định 6 tháng)...")
@@ -871,7 +871,7 @@ if main_menu == "Trang chủ":
                     row=2, col=1
                 )
                 
-                st.plotly_chart(fig_vnindex, use_container_width=True)
+                st.plotly_chart(fig_vnindex, width='stretch')
                 
                 # Enhanced Quick Stats with more metrics
                 stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
@@ -1468,11 +1468,11 @@ elif main_menu == "Thị trường":
                     fig_investor.update_yaxes(showgrid=False, secondary_y=False)
                     fig_investor.update_yaxes(showgrid=False, secondary_y=True)
                     
-                    st.plotly_chart(fig_investor, use_container_width=True)
+                    st.plotly_chart(fig_investor, width='stretch')
                     
                     # Show data table
                     with st.expander("📊 Xem dữ liệu chi tiết"):
-                        st.dataframe(investor_df, use_container_width=True)
+                        st.dataframe(investor_df, width='stretch')
                         st.download_button(
                             "Tải xuống dữ liệu CSV",
                             investor_df.to_csv(index=False),
@@ -1555,7 +1555,7 @@ elif main_menu == "Thị trường":
                     fig_td.update_yaxes(showgrid=False, secondary_y=False)
                     fig_td.update_yaxes(showgrid=False, secondary_y=True)
                     
-                    st.plotly_chart(fig_td, use_container_width=True)
+                    st.plotly_chart(fig_td, width='stretch')
                 else:
                     st.warning("Không có dữ liệu Tự doanh ròng.")
             else:
@@ -1631,7 +1631,7 @@ elif main_menu == "Thị trường":
                     fig_cntn.update_yaxes(showgrid=False, secondary_y=False)
                     fig_cntn.update_yaxes(showgrid=False, secondary_y=True)
                     
-                    st.plotly_chart(fig_cntn, use_container_width=True)
+                    st.plotly_chart(fig_cntn, width='stretch')
                 else:
                     st.warning("Không có dữ liệu Cá nhân trong nước ròng.")
             else:
@@ -1707,7 +1707,7 @@ elif main_menu == "Thị trường":
                     fig_tctn.update_yaxes(showgrid=False, secondary_y=False)
                     fig_tctn.update_yaxes(showgrid=False, secondary_y=True)
                     
-                    st.plotly_chart(fig_tctn, use_container_width=True)
+                    st.plotly_chart(fig_tctn, width='stretch')
                 else:
                     st.warning("Không có dữ liệu Tổ chức trong nước ròng.")
             else:
@@ -1783,7 +1783,7 @@ elif main_menu == "Thị trường":
                     fig_cnnn.update_yaxes(showgrid=False, secondary_y=False)
                     fig_cnnn.update_yaxes(showgrid=False, secondary_y=True)
                     
-                    st.plotly_chart(fig_cnnn, use_container_width=True)
+                    st.plotly_chart(fig_cnnn, width='stretch')
                 else:
                     st.warning("Không có dữ liệu Cá nhân nước ngoài ròng.")
             else:
@@ -1859,7 +1859,7 @@ elif main_menu == "Thị trường":
                     fig_tcnn.update_yaxes(showgrid=False, secondary_y=False)
                     fig_tcnn.update_yaxes(showgrid=False, secondary_y=True)
                     
-                    st.plotly_chart(fig_tcnn, use_container_width=True)
+                    st.plotly_chart(fig_tcnn, width='stretch')
                 else:
                     st.warning("Không có dữ liệu Tổ chức nước ngoài ròng.")
             else:
@@ -2048,10 +2048,10 @@ elif main_menu == "Cổ phiếu":
                                     fig_pb.update_layout(margin=dict(r=120, t=120))
 
                                 fig_pb.update_layout(title=f"P/B historical for {symbol}", xaxis_title='Date', yaxis_title='P/B', height=520, hovermode='x unified')
-                                st.plotly_chart(fig_pb, use_container_width=True)
+                                st.plotly_chart(fig_pb, width='stretch')
 
                                 with st.expander("Xem dữ liệu P/B chi tiết"):
-                                    st.dataframe(pb_df.rename(columns={'tradingDate': 'time'}), use_container_width=True)
+                                    st.dataframe(pb_df.rename(columns={'tradingDate': 'time'}), width='stretch')
                                     st.download_button("Tải xuống P/B CSV", pb_df.to_csv(index=False), f"pb_{symbol}.csv", "text/csv")
                         except Exception as e:
                             st.error(f"Lỗi khi tải dữ liệu P/B: {e}")
@@ -2173,10 +2173,10 @@ elif main_menu == "Cổ phiếu":
                                         fig_pe.update_layout(margin=dict(r=120, t=120))
 
                                     fig_pe.update_layout(title=f"P/E historical for {symbol}", xaxis_title='Date', yaxis_title='P/E', height=520, hovermode='x unified')
-                                    st.plotly_chart(fig_pe, use_container_width=True)
+                                    st.plotly_chart(fig_pe, width='stretch')
 
                                     with st.expander("Xem dữ liệu P/E chi tiết"):
-                                        st.dataframe(pe_df.rename(columns={'tradingDate': 'time'}), use_container_width=True)
+                                        st.dataframe(pe_df.rename(columns={'tradingDate': 'time'}), width='stretch')
                                         st.download_button("Tải xuống P/E CSV", pe_df.to_csv(index=False), f"pe_{symbol}.csv", "text/csv")
                         except Exception as e:
                             st.error(f"Lỗi khi tải dữ liệu P/E: {e}")
@@ -2270,7 +2270,7 @@ elif main_menu == "Cổ phiếu":
                                     interpretation = "Cổ phiếu có thể đang bị định giá cao"
                                     color = "red"
                                 
-                                st.plotly_chart(fig_gauge, use_container_width=True)
+                                st.plotly_chart(fig_gauge, width='stretch')
                                 
                                 # Display interpretation
                                 st.markdown(f"<p style='color:{color}; font-size: 18px; font-weight: bold;'>{interpretation}</p>", unsafe_allow_html=True)
@@ -2301,7 +2301,7 @@ elif main_menu == "Cổ phiếu":
                                         display_data.index = display_data.index.astype(str)
                                         display_data = display_data[['epsgrowth']]
                                         display_data.columns = ['Tăng trưởng EPS (%)']
-                                        st.dataframe(display_data.style.format({'Tăng trưởng EPS (%)': '{:.2f}'}), use_container_width=True)
+                                        st.dataframe(display_data.style.format({'Tăng trưởng EPS (%)': '{:.2f}'}), width='stretch')
                                     except Exception as e:
                                         st.warning(f"Không thể hiển thị bảng dữ liệu dự báo: {e}")
                                 else:
@@ -2493,7 +2493,7 @@ elif main_menu == "Cổ phiếu":
         
         with input_col3:
             st.caption(f"📅 {datetime.now().strftime('%d/%m/%Y')}")
-            load_button = st.button("📊 Tải dữ liệu", key="load_stock_investor_data", use_container_width=True)
+            load_button = st.button("📊 Tải dữ liệu", key="load_stock_investor_data", width='stretch')
         
         # Initialize session state for loaded symbol
         if "loaded_stock_symbol" not in st.session_state:
@@ -2667,10 +2667,10 @@ elif main_menu == "Cổ phiếu":
                         fig_stock_inv.update_yaxes(showgrid=False, secondary_y=False)
                         fig_stock_inv.update_yaxes(showgrid=False, secondary_y=True)
                         
-                        st.plotly_chart(fig_stock_inv, use_container_width=True)
+                        st.plotly_chart(fig_stock_inv, width='stretch')
                         
                         with st.expander("📊 Xem dữ liệu chi tiết"):
-                            st.dataframe(stock_investor_df, use_container_width=True)
+                            st.dataframe(stock_investor_df, width='stretch')
                             st.download_button(
                                 "Tải xuống dữ liệu CSV",
                                 stock_investor_df.to_csv(index=False),
@@ -2750,7 +2750,7 @@ elif main_menu == "Cổ phiếu":
                         fig_td_cp.update_yaxes(showgrid=False, secondary_y=False)
                         fig_td_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
-                        st.plotly_chart(fig_td_cp, use_container_width=True)
+                        st.plotly_chart(fig_td_cp, width='stretch')
                     else:
                         st.warning("Không có dữ liệu Tự doanh ròng.")
                 else:
@@ -2823,7 +2823,7 @@ elif main_menu == "Cổ phiếu":
                         fig_cntn_cp.update_yaxes(showgrid=False, secondary_y=False)
                         fig_cntn_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
-                        st.plotly_chart(fig_cntn_cp, use_container_width=True)
+                        st.plotly_chart(fig_cntn_cp, width='stretch')
                     else:
                         st.warning("Không có dữ liệu Cá nhân trong nước ròng.")
                 else:
@@ -2896,7 +2896,7 @@ elif main_menu == "Cổ phiếu":
                         fig_tctn_cp.update_yaxes(showgrid=False, secondary_y=False)
                         fig_tctn_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
-                        st.plotly_chart(fig_tctn_cp, use_container_width=True)
+                        st.plotly_chart(fig_tctn_cp, width='stretch')
                     else:
                         st.warning("Không có dữ liệu Tổ chức trong nước ròng.")
                 else:
@@ -2969,7 +2969,7 @@ elif main_menu == "Cổ phiếu":
                         fig_cnnn_cp.update_yaxes(showgrid=False, secondary_y=False)
                         fig_cnnn_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
-                        st.plotly_chart(fig_cnnn_cp, use_container_width=True)
+                        st.plotly_chart(fig_cnnn_cp, width='stretch')
                     else:
                         st.warning("Không có dữ liệu Cá nhân nước ngoài ròng.")
                 else:
@@ -3042,7 +3042,7 @@ elif main_menu == "Cổ phiếu":
                         fig_tcnn_cp.update_yaxes(showgrid=False, secondary_y=False)
                         fig_tcnn_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
-                        st.plotly_chart(fig_tcnn_cp, use_container_width=True)
+                        st.plotly_chart(fig_tcnn_cp, width='stretch')
                     else:
                         st.warning("Không có dữ liệu Tổ chức nước ngoài ròng.")
                 else:
