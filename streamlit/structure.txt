@@ -1,0 +1,58 @@
+streamlit/
+├── dashboard.py                    # Main dashboard with conditional imports
+├── valuation/
+│   ├── __init__.py
+│   └── valuation.py               # P/B, P/E, PEG functions
+├── market_sentiment/
+│   ├── __init__.py
+│   └── sentiment.py               # Market sentiment functions
+├── stock_data/
+│   ├── __init__.py
+│   └── stock_data.py              # Stock data functions
+└── vci_token/
+    ├── __init__.py
+    └── token.py                    # Token management
+
+
+
+streamlit dashboard
+├── Trang chủ               
+├── Thị trường
+│   ├── Tâm lý thị trường
+│   │   ├── Sentiment
+│   │   ├── Volatility
+│   │   ├── High-low Index
+│   │   ├── Bullish Percent Index (BPI)
+│   │   ├── MA
+│   │   ├── Market Breadth
+│   └── Phân loại nhà đầu tư
+│       ├── GTGD ròng (line giá + stacked bar)
+│       ├── Cá nhân trong nước (bar + line -- ròng)
+│       ├── Tổ chứ trong nước (bar + line -- ròng)
+│       ├── Tự doanh (bar + line -- ròng)
+│       ├── Cá nhân nước ngoài (bar + line -- ròng)
+│       ├── Tổ chức nước ngoài (bar + line -- ròng)
+├── Cổ phiếu
+│   ├── Định giá
+│   │   ├── P/B
+│   │   ├── P/E
+│   │   ├── PEG
+│   │   ├── Features
+│   ├── Phân loại nhà đầu tư
+│   │   ├── GTGD ròng (line giá + stacked bar)
+│   │   ├── Cá nhân trong nước (bar + line -- ròng)
+│   │   ├── Tổ chứ trong nước (bar + line -- ròng)
+│   │   ├── Tự doanh (bar + line -- ròng)
+│   │   ├── Cá nhân nước ngoài (bar + line -- ròng)
+│   │   ├── Tổ chức nước ngoài (bar + line -- ròng)
+│   ├── Bộ lọc
+│   │   ├── Investor 52
+│   │   ├── 
+│   │   ├── 
+│   └── 
+├── stock_data/
+│   ├── __init__.py
+│   └── stock_data.py              # Stock data functions
+└── vci_token/
+    ├── __init__.py
+    └── token.py                    # Token management
