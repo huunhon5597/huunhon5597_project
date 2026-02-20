@@ -253,6 +253,11 @@ def high_low_index(start_date, end_date=None):
     end = _parse_date(end_date) or datetime.now().date()
 
     hose_list = get_stock_symbols()
+    
+    # Check if we got a valid symbol list
+    if not hose_list:
+        print("Warning: Could not fetch stock symbols for High-Low Index")
+        return pd.DataFrame(columns=['time', 'peak_count', 'trough_count', 'record_high_percent', 'hl_index'])
 
     # Tối ưu: Xử lý song song các mã cổ phiếu với số lượng worker lớn hơn
     from functools import partial
@@ -469,6 +474,11 @@ def bpi(start_date, end_date=None):
         end_date = datetime.now().strftime('%Y-%m-%d')
 
     hose_list = get_stock_symbols()
+    
+    # Check if we got a valid symbol list
+    if not hose_list:
+        print("Warning: Could not fetch stock symbols for BPI")
+        return pd.DataFrame(columns=['time', 'count', 'total', 'bpi'])
     
     start_date_dt = pd.to_datetime(start_date)
     end_date_dt = pd.to_datetime(end_date)

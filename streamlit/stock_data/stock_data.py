@@ -2,7 +2,6 @@ import pandas as pd
 import requests
 import json
 from datetime import datetime
-from functools import lru_cache
 import time
 
 # Create a global session with connection pooling for better performance
@@ -113,9 +112,20 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
         print(f"Error parsing response")
         return pd.DataFrame()
 
-@lru_cache(maxsize=1)
+# Cache for stock symbols - using a simple dict cache with TTL-like behavior
+_symbols_cache = None
+_symbols_cache_time = 0
+_SYMBOLS_CACHE_TTL = 300  # 5 minutes cache TTL
+
 def get_stock_symbols(exchange="HOSE"):
     """Get stock symbols list with caching to avoid repeated API calls."""
+    global _symbols_cache, _symbols_cache_time
+    
+    # Check cache
+    current_time = time.time()
+    if _symbols_cache is not None and (current_time - _symbols_cache_time) < _SYMBOLS_CACHE_TTL:
+        return _symbols_cache
+    
     url = "https://trading.vietcap.com.vn/api/price/v1/w/priceboard/tickers/price/group"
     
     payload = json.dumps({"group": exchange})
@@ -128,9 +138,38 @@ def get_stock_symbols(exchange="HOSE"):
     }
     
     session = _get_session()
-    response = session.post(url, headers=headers, data=payload, timeout=15)
-    data = pd.DataFrame(response.json())
-    return data['s'].sort_values().tolist()
+    try:
+        response = session.post(url, headers=headers, data=payload, timeout=15)
+        if response.status_code != 200:
+            print(f"Error fetching stock symbols: HTTP {response.status_code}")
+            return _symbols_cache if _symbols_cache is not None else []
+        
+        # Check if response has content
+        if not response.text or response.text.strip() == '':
+            print("Error: Empty response from API")
+            return _symbols_cache if _symbols_cache is not None else []
+        
+        json_data = response.json()
+        if not json_data:
+            print("Error: Empty JSON response")
+            return _symbols_cache if _symbols_cache is not None else []
+        
+        data = pd.DataFrame(json_data)
+        if data.empty or 's' not in data.columns:
+            print("Error: No symbol data found")
+            return _symbols_cache if _symbols_cache is not None else []
+        
+        result = data['s'].sort_values().tolist()
+        # Only cache successful results
+        _symbols_cache = result
+        _symbols_cache_time = current_time
+        return result
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error: {e}")
+        return _symbols_cache if _symbols_cache is not None else []
+    except Exception as e:
+        print(f"Error fetching stock symbols: {e}")
+        return _symbols_cache if _symbols_cache is not None else []
 
 def investor_type(symbol='VN-Index', start_date=None, end_date=None):
     """
