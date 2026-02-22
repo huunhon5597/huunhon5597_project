@@ -353,6 +353,7 @@ def high_low_index(start_date, end_date=None):
 def market_breadth(start_date, end_date):
     """
     Lấy dữ liệu Market Breadth từ VietCap và ghép với VN-Index.
+    Sử dụng nhiều API sources để đảm bảo dữ liệu đầy đủ.
 
     Args:
         start_date (str): Ngày bắt đầu (format: YYYY-MM-DD)
@@ -419,7 +420,10 @@ def market_breadth(start_date, end_date):
         start_date_epoch = int(time.mktime(time.strptime(str(start_date).split()[0], "%Y-%m-%d")))
         end_date_epoch = int(time.mktime(time.strptime(str(end_date).split()[0], "%Y-%m-%d")))
 
-    # API 2: Lấy dữ liệu VN-Index
+    # API 2: Lấy dữ liệu VN-Index - Try multiple sources
+    vni_df = pd.DataFrame({'c': [], 't': []})
+    
+    # Source 1: VietCap API
     url2 = "https://trading.vietcap.com.vn/api/chart/OHLCChart/gap"
     payload = json.dumps({
         "from": start_date_epoch,
@@ -440,25 +444,51 @@ def market_breadth(start_date, end_date):
         response2.raise_for_status()
         vni_json = response2.json()
 
-        if not vni_json or not isinstance(vni_json, list) or not vni_json[0]:
-            vni_df = pd.DataFrame({'c': [], 't': []})
-        else:
+        if vni_json and isinstance(vni_json, list) and vni_json[0]:
             vni_df = pd.DataFrame(vni_json[0])[['c', 't']]
-
-        vni_df['t'] = pd.to_datetime(vni_df['t'], unit='s')
+            vni_df['t'] = pd.to_datetime(vni_df['t'], unit='s')
+    except Exception:
+        pass  # Will try alternative sources
     
-    except (requests.exceptions.RequestException, json.JSONDecodeError):
-        # If VN-Index data fails, we can still proceed with the breadth data
-        # The 'vnindex' column will just be empty (NaN)
-        vni_df = pd.DataFrame({'c': [], 't': []})
+    # Source 2: Fireant API if VietCap failed
+    if vni_df.empty:
+        try:
+            fireant_url = f"https://restv2.fireant.vn/symbols/VNINDEX/historical-prices?startDate={start_date}&endDate={end_date}&offset=0&limit=1000"
+            fireant_headers = {
+                'Accept': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response3 = session.get(fireant_url, headers=fireant_headers, timeout=10)
+            if response3.status_code == 200:
+                fireant_data = response3.json()
+                if fireant_data:
+                    vni_df = pd.DataFrame(fireant_data)
+                    if 'closePrice' in vni_df.columns and 'tradingDate' in vni_df.columns:
+                        vni_df = vni_df[['closePrice', 'tradingDate']].rename(columns={'closePrice': 'c', 'tradingDate': 't'})
+                        vni_df['t'] = pd.to_datetime(vni_df['t'])
+        except Exception:
+            pass
+    
+    # Source 3: Use get_stock_history function as last resort
+    if vni_df.empty:
+        try:
+            from stock_data import get_stock_history
+            days_diff = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 10
+            vnindex_data = get_stock_history('VNINDEX', 'day', end_date, days_diff)
+            if not vnindex_data.empty:
+                vni_df = vnindex_data[['close', 'time']].rename(columns={'close': 'c', 'time': 't'})
+                vni_df['t'] = pd.to_datetime(vni_df['t'])
+        except Exception:
+            pass
 
     # Merge dữ liệu
     data['time'] = pd.to_datetime(data['time'])
     # Ensure vni_df time is also just date for merging
-    vni_df['t'] = pd.to_datetime(vni_df['t']).dt.date
+    if not vni_df.empty:
+        vni_df['t'] = pd.to_datetime(vni_df['t']).dt.date
     data['time'] = data['time'].dt.date
 
-    result = data.merge(vni_df, left_on='time', right_on='t', how='left').drop('t', axis=1).rename(columns={'c': 'vnindex'})
+    result = data.merge(vni_df, left_on='time', right_on='t', how='left').drop('t', axis=1, errors='ignore').rename(columns={'c': 'vnindex'})
 
     # Ensure 'time' is a datetime for plotting
     if 'time' in result.columns and not result['time'].empty:

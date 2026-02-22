@@ -51,9 +51,70 @@ _stock_history_cache = {}
 _cache_timestamps = {}
 _CACHE_TTL = 300  # 5 minutes cache TTL
 
+def _fetch_history_from_vietcap(symbol, period, end_date_epoch, count_back):
+    """Fetch stock history from VietCap API."""
+    url = f"https://api.vietcap.com.vn/ohlc-chart-service/v1/gap-chart?symbol={symbol}&to={end_date_epoch}&timeFrame=ONE_{period.upper()}&countBack={count_back}"
+    headers = {
+        'Accept': 'application/json',
+        'Origin': 'https://trading.vietcap.com.vn',
+        'Referer': 'https://trading.vietcap.com.vn/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
+    session = _get_session()
+    try:
+        response = session.get(url, headers=headers, timeout=10)
+        if response.status_code == 200 and response.text and response.text.strip() != '':
+            json_data = response.json()
+            if json_data and 'data' in json_data and json_data['data']:
+                return json_data['data']
+    except Exception:
+        pass
+    return None
+
+def _fetch_history_from_fireant(symbol, period, end_date, count_back):
+    """Fetch stock history from Fireant API as fallback."""
+    try:
+        # Calculate start date from end_date and count_back
+        end_dt = pd.to_datetime(end_date)
+        start_dt = end_dt - timedelta(days=count_back * 2)  # Buffer for non-trading days
+        
+        url = f"https://restv2.fireant.vn/symbols/{symbol}/historical-prices"
+        params = {
+            'startDate': start_dt.strftime('%Y-%m-%d'),
+            'endDate': end_dt if isinstance(end_date, str) else end_date,
+            'offset': 0,
+            'limit': count_back + 50
+        }
+        headers = {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        session = _get_session()
+        response = session.get(url, headers=headers, params=params, timeout=10)
+        if response.status_code == 200 and response.text:
+            data = response.json()
+            if data:
+                # Convert Fireant format to VietCap format
+                result = []
+                for item in data:
+                    result.append({
+                        't': int(pd.to_datetime(item['tradingDate']).timestamp()),
+                        'o': item.get('openPrice', 0),
+                        'h': item.get('highestPrice', 0),
+                        'l': item.get('lowestPrice', 0),
+                        'c': item.get('closePrice', 0),
+                        'v': item.get('totalVolume', 0)
+                    })
+                return result
+    except Exception:
+        pass
+    return None
+
 def get_stock_history(symbol, period="day", end_date=None, count_back=252):
     """
-    Lấy dữ liệu giá lịch sử cổ phiếu
+    Lấy dữ liệu giá lịch sử cổ phiếu với nhiều API sources.
     
     Args:
         symbol (str): Mã cổ phiếu (VD: VCB, SSI)
@@ -79,34 +140,17 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
     
     end_date_epoch = int(pd.to_datetime(end_date).timestamp())
     
-    url = f"https://api.vietcap.com.vn/ohlc-chart-service/v1/gap-chart?symbol={symbol}&to={end_date_epoch}&timeFrame=ONE_{period.upper()}&countBack={count_back}"
+    # Try VietCap API first
+    data = _fetch_history_from_vietcap(symbol, period, end_date_epoch, count_back)
     
-    headers = {
-        'Accept': 'application/json',
-        'Origin': 'https://trading.vietcap.com.vn',
-        'Referer': 'https://trading.vietcap.com.vn/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-
-    session = _get_session()
+    # Try Fireant API as fallback
+    if not data:
+        data = _fetch_history_from_fireant(symbol, period, end_date, count_back)
+    
+    if not data:
+        return pd.DataFrame()
+    
     try:
-        response = session.get(url, headers=headers, timeout=10)
-        
-        if response.status_code != 200:
-            return pd.DataFrame()
-        
-        # Check if response has content
-        if not response.text or response.text.strip() == '':
-            return pd.DataFrame()
-        
-        json_data = response.json()
-        if not json_data or 'data' not in json_data:
-            return pd.DataFrame()
-        
-        data = json_data['data']
-        if not data:
-            return pd.DataFrame()
-        
         df = pd.DataFrame(data)
         df.drop(['symbol', 'accumulatedVolume', 'accumulatedValue', 'minBatchTruncTime'], axis=1, inplace=True, errors='ignore')
         df = df.rename(columns={'t': 'time', 'c': 'close', 'o': 'open', 'h': 'high', 'l': 'low', 'v': 'volume'})
@@ -118,86 +162,132 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
         _cache_timestamps[cache_key] = time.time()
         
         return df
-    except Exception as e:
-        # Silent fail - return empty DataFrame
+    except Exception:
         return pd.DataFrame()
 
 # Cache for stock symbols - using a simple dict cache with TTL-like behavior
 _symbols_cache = None
 _symbols_cache_time = 0
-_SYMBOLS_CACHE_TTL = 300  # 5 minutes cache TTL
+_SYMBOLS_CACHE_TTL = 3600  # 1 hour cache TTL
 
-# Fallback list of popular HOSE stocks in case API fails
-_HOSE_FALLBACK = [
-    'ACB', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'MBB',
-    'MSN', 'MWG', 'NVL', 'PDR', 'PLX', 'POW', 'REE', 'SAB', 'SSI', 'STB',
-    'TCB', 'VCB', 'VHM', 'VIB', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE', 'ANV',
-    'APG', 'ASM', 'BCG', 'BMP', 'BSI', 'BWE', 'CII', 'CMG', 'CRE', 'CTS',
-    'DBC', 'DCM', 'DGC', 'DHC', 'DIG', 'DPG', 'DPM', 'DRC', 'DXG', 'EIB',
-    'FIT', 'FLC', 'FRT', 'FTS', 'GEG', 'GEX', 'GMD', 'HAG', 'HAH', 'HBC',
-    'HCM', 'HDC', 'HHS', 'HNG', 'HPG', 'HPX', 'HSG', 'HT1', 'HVG', 'KDC',
-    'KDH', 'KOS', 'KQB', 'L14', 'LDG', 'MCH', 'MCG', 'MSH', 'NBB', 'NKG',
-    'NLG', 'NT2', 'NTL', 'OCB', 'PC1', 'PGB', 'PGC', 'PNJ', 'PPC', 'PVT',
-    'PVD', 'PVS', 'QCG', 'RGC', 'SBT', 'SCS', 'SGC', 'SGN', 'SHI', 'SIP',
-    'SKG', 'SMB', 'SMT', 'SRD', 'SSB', 'SSC', 'STK', 'SZC', 'TAC', 'TCI',
-    'TDM', 'TNG', 'TPB', 'TTB', 'TV2', 'TVB', 'VCA', 'VCF', 'VCI', 'VDS',
-    'VGC', 'VHC', 'VIB', 'VND', 'VNE', 'VNI', 'VNP', 'VOS', 'VPI', 'VSC',
-    'VSH', 'VTO', 'YEG'
-]
-
-def get_stock_symbols(exchange="HOSE"):
-    """Get stock symbols list with caching to avoid repeated API calls."""
-    global _symbols_cache, _symbols_cache_time
-    
-    # Check cache
-    current_time = time.time()
-    if _symbols_cache is not None and (current_time - _symbols_cache_time) < _SYMBOLS_CACHE_TTL:
-        return _symbols_cache
-    
+def _fetch_symbols_from_vietcap(exchange="HOSE"):
+    """Fetch stock symbols from VietCap API."""
     url = "https://trading.vietcap.com.vn/api/price/v1/w/priceboard/tickers/price/group"
-    
     payload = json.dumps({"group": exchange})
     headers = {
         'Accept': 'application/json, text/plain, */*',
         'Content-Type': 'application/json',
-        'Device-Id': '194d5c0250f11306',
         'Origin': 'https://trading.vietcap.com.vn',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
     session = _get_session()
     try:
-        response = session.post(url, headers=headers, data=payload, timeout=10)
-        if response.status_code != 200:
-            print(f"Error fetching stock symbols: HTTP {response.status_code}, using fallback list")
-            return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
-        
-        # Check if response has content
-        if not response.text or response.text.strip() == '':
-            print("Error: Empty response from API, using fallback list")
-            return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
-        
-        json_data = response.json()
-        if not json_data:
-            print("Error: Empty JSON response, using fallback list")
-            return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
-        
-        data = pd.DataFrame(json_data)
-        if data.empty or 's' not in data.columns:
-            print("Error: No symbol data found, using fallback list")
-            return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
-        
-        result = data['s'].sort_values().tolist()
-        # Only cache successful results
-        _symbols_cache = result
-        _symbols_cache_time = current_time
-        return result
-    except json.JSONDecodeError as e:
-        print(f"JSON decode error: {e}, using fallback list")
-        return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
+        response = session.post(url, headers=headers, data=payload, timeout=15)
+        if response.status_code == 200 and response.text and response.text.strip() != '':
+            json_data = response.json()
+            if json_data:
+                data = pd.DataFrame(json_data)
+                if not data.empty and 's' in data.columns:
+                    return data['s'].sort_values().tolist()
     except Exception as e:
-        print(f"Error fetching stock symbols: {e}, using fallback list")
-        return _symbols_cache if _symbols_cache is not None else _HOSE_FALLBACK
+        print(f"VietCap API error: {e}")
+    return None
+
+def _fetch_symbols_from_fireant(exchange="HOSE"):
+    """Fetch stock symbols from Fireant API as fallback."""
+    url = "https://restv2.fireant.vn/symbols"
+    headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
+    session = _get_session()
+    try:
+        response = session.get(url, headers=headers, timeout=15)
+        if response.status_code == 200 and response.text:
+            data = response.json()
+            if isinstance(data, list):
+                # Filter by exchange (HOSE = "HOSE", HNX = "HNX", UPCOM = "UPCOM")
+                symbols = [s['symbol'] for s in data if s.get('exchange', '') == exchange]
+                if symbols:
+                    return sorted(symbols)
+    except Exception as e:
+        print(f"Fireant API error: {e}")
+    return None
+
+def _fetch_symbols_from_ssi(exchange="HOSE"):
+    """Fetch stock symbols from SSI API as another fallback."""
+    # SSI API endpoint for stock list
+    url = f"https://fc-data.ssi.com.vn/api/v2/Market/Securities?market={exchange}"
+    headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
+    session = _get_session()
+    try:
+        response = session.get(url, headers=headers, timeout=15)
+        if response.status_code == 200 and response.text:
+            json_data = response.json()
+            if json_data and 'data' in json_data:
+                data = json_data['data']
+                if isinstance(data, list):
+                    # Get symbol from Ticker field
+                    symbols = [s.get('Ticker', s.get('Symbol', '')) for s in data if s.get('Ticker') or s.get('Symbol')]
+                    if symbols:
+                        return sorted([s for s in symbols if s])
+    except Exception as e:
+        print(f"SSI API error: {e}")
+    return None
+
+def get_stock_symbols(exchange="HOSE"):
+    """
+    Get stock symbols list with caching and multiple API fallbacks.
+    
+    Tries APIs in order:
+    1. VietCap API (primary)
+    2. Fireant API (fallback 1)
+    3. SSI API (fallback 2)
+    
+    Returns cached data if all APIs fail.
+    """
+    global _symbols_cache, _symbols_cache_time
+    
+    # Check cache first
+    current_time = time.time()
+    if _symbols_cache is not None and (current_time - _symbols_cache_time) < _SYMBOLS_CACHE_TTL:
+        return _symbols_cache
+    
+    # Try VietCap API first (primary source)
+    print(f"Fetching {exchange} symbols from VietCap API...")
+    symbols = _fetch_symbols_from_vietcap(exchange)
+    
+    if not symbols:
+        # Try Fireant API as fallback
+        print(f"VietCap failed, trying Fireant API...")
+        symbols = _fetch_symbols_from_fireant(exchange)
+    
+    if not symbols:
+        # Try SSI API as last resort
+        print(f"Fireant failed, trying SSI API...")
+        symbols = _fetch_symbols_from_ssi(exchange)
+    
+    if symbols:
+        # Cache successful result
+        _symbols_cache = symbols
+        _symbols_cache_time = current_time
+        print(f"Successfully fetched {len(symbols)} {exchange} symbols")
+        return symbols
+    
+    # Return cached data if available (even if expired)
+    if _symbols_cache is not None:
+        print(f"All APIs failed, using cached data ({len(_symbols_cache)} symbols)")
+        return _symbols_cache
+    
+    # No data available
+    print(f"All APIs failed and no cache available for {exchange}")
+    return []
 
 def investor_type(symbol='VN-Index', start_date=None, end_date=None):
     """
