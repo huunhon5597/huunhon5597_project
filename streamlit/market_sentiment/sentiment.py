@@ -411,54 +411,31 @@ def market_breadth(start_date, end_date):
     if 'time' in data.columns and not data['time'].empty:
         data['time'] = pd.to_datetime(data['time']).dt.date
 
-    # Convert dates to epoch seconds for VN-Index API (use pandas for robustness)
-    try:
-        start_date_epoch = int(pd.to_datetime(start_date).timestamp())
-        end_date_epoch = int(pd.to_datetime(end_date).timestamp())
-    except Exception:
-        start_date_epoch = int(time.mktime(time.strptime(str(start_date).split()[0], "%Y-%m-%d")))
-        end_date_epoch = int(time.mktime(time.strptime(str(end_date).split()[0], "%Y-%m-%d")))
-
-    # API 2: Lấy dữ liệu VN-Index
-    url2 = "https://trading.vietcap.com.vn/api/chart/OHLCChart/gap"
-    payload = json.dumps({
-        "from": start_date_epoch,
-        "to": end_date_epoch,
-        "symbols": ["VNINDEX"],
-        "timeFrame": "ONE_DAY"
-    })
-    headers2 = {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'Origin': 'https://trading.vietcap.com.vn',
-      'Referer': 'https://trading.vietcap.com.vn/',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
+    # Lấy dữ liệu VN-Index sử dụng get_stock_history (tương tự như hàm ma)
+    # Tính số ngày cần lấy
+    start_date_dt = pd.to_datetime(start_date)
+    end_date_dt = pd.to_datetime(end_date)
+    days_to_fetch = (end_date_dt - start_date_dt).days + 10  # Thêm buffer 10 ngày
     
     try:
-        response2 = session.post(url2, headers=headers2, data=payload, timeout=10)
-        response2.raise_for_status()
-        vni_json = response2.json()
-
-        if not vni_json or not isinstance(vni_json, list) or not vni_json[0]:
-            vni_df = pd.DataFrame({'c': [], 't': []})
+        vni_df = get_stock_history('VNINDEX', 'day', end_date, days_to_fetch)
+        if vni_df.empty or 'close' not in vni_df.columns:
+            vni_df = pd.DataFrame({'time': [], 'close': []})
         else:
-            vni_df = pd.DataFrame(vni_json[0])[['c', 't']]
-
-        vni_df['t'] = pd.to_datetime(vni_df['t'], unit='s')
-    
-    except (requests.exceptions.RequestException, json.JSONDecodeError):
+            vni_df = vni_df[['time', 'close']].copy()
+            vni_df['time'] = pd.to_datetime(vni_df['time'])
+    except Exception:
         # If VN-Index data fails, we can still proceed with the breadth data
         # The 'vnindex' column will just be empty (NaN)
-        vni_df = pd.DataFrame({'c': [], 't': []})
+        vni_df = pd.DataFrame({'time': [], 'close': []})
 
     # Merge dữ liệu
     data['time'] = pd.to_datetime(data['time'])
     # Ensure vni_df time is also just date for merging
-    vni_df['t'] = pd.to_datetime(vni_df['t']).dt.date
+    vni_df['time'] = pd.to_datetime(vni_df['time']).dt.date
     data['time'] = data['time'].dt.date
 
-    result = data.merge(vni_df, left_on='time', right_on='t', how='left').drop('t', axis=1).rename(columns={'c': 'vnindex'})
+    result = data.merge(vni_df, left_on='time', right_on='time', how='left').rename(columns={'close': 'vnindex'})
 
     # Ensure 'time' is a datetime for plotting
     if 'time' in result.columns and not result['time'].empty:
