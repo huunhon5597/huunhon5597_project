@@ -312,13 +312,13 @@ def high_low_index(start_date, end_date=None):
             return None
     
     # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
-    max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
+    max_workers = min(3, len(hose_list))  # Giảm số worker xuống 3 để tránh rate limiting trên deployed server
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tất cả các task cùng lúc
         futures = {executor.submit(process_stock, symbol, start, end): symbol for symbol in hose_list}
         
-        # Thu thập kết quả khi hoàn thành với timeout
-        for future in as_completed(futures, timeout=120):  # 2 minute timeout
+        # Thu thập kết quả khi hoàn thành với timeout (tăng lên 5 phút do ít worker hơn)
+        for future in as_completed(futures, timeout=300):  # 5 minute timeout
             try:
                 result = future.result(timeout=30)  # 30 second timeout per stock
                 if result:
@@ -514,13 +514,13 @@ def bpi(start_date, end_date=None):
             return None, None
     
     # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
-    max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
+    max_workers = min(3, len(hose_list))  # Giảm số worker xuống 3 để tránh rate limiting trên deployed server
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tất cả các task cùng lúc
         futures = {executor.submit(process_stock_for_bpi, symbol, start_date_dt, end_date_dt): symbol for symbol in hose_list}
         
-        # Xử lý kết quả khi các task hoàn thành với timeout
-        for future in as_completed(futures, timeout=180):  # 3 minute timeout
+        # Xử lý kết quả khi các task hoàn thành với timeout (tăng lên 5 phút do ít worker hơn)
+        for future in as_completed(futures, timeout=300):  # 5 minute timeout
             try:
                 result = future.result(timeout=30)  # 30 second timeout per stock
                 if result:
