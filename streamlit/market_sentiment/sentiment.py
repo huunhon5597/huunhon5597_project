@@ -9,7 +9,6 @@ import time
 import numpy as np
 from arch import arch_model
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 
 import sys
 import os
@@ -18,55 +17,6 @@ from stock_data import get_stock_symbols, get_stock_history
 
 # Create a global session with connection pooling for better performance
 _session = None
-
-# Rate Limiter - Giới hạn số requests per second để tránh bị chặn
-class RateLimiter:
-    """
-    Rate limiter sử dụng token bucket algorithm.
-    Giới hạn số requests có thể thực hiện trong một khoảng thời gian.
-    """
-    def __init__(self, max_requests_per_second=3, burst_size=5):
-        """
-        Args:
-            max_requests_per_second: Số requests tối đa mỗi giây
-            burst_size: Số requests có thể thực hiện cùng lúc (burst)
-        """
-        self.max_requests_per_second = max_requests_per_second
-        self.burst_size = burst_size
-        self.tokens = burst_size
-        self.last_update = time.time()
-        self.lock = threading.Lock()
-    
-    def acquire(self, tokens=1):
-        """
-        Acquire tokens from the bucket. Blocks if not enough tokens available.
-        """
-        with self.lock:
-            now = time.time()
-            # Replenish tokens based on time elapsed
-            elapsed = now - self.last_update
-            self.tokens = min(self.burst_size, self.tokens + elapsed * self.max_requests_per_second)
-            self.last_update = now
-            
-            if self.tokens >= tokens:
-                self.tokens -= tokens
-                return 0  # No wait needed
-            
-            # Calculate wait time
-            wait_time = (tokens - self.tokens) / self.max_requests_per_second
-            self.tokens = 0
-            return wait_time
-    
-    def wait(self, tokens=1):
-        """
-        Wait if necessary to acquire tokens.
-        """
-        wait_time = self.acquire(tokens)
-        if wait_time > 0:
-            time.sleep(wait_time)
-
-# Global rate limiter instance - 3 requests per second, burst up to 5
-_rate_limiter = RateLimiter(max_requests_per_second=3, burst_size=5)
 
 def _get_session():
     """Get or create a requests session with connection pooling."""
@@ -290,7 +240,7 @@ def volatility(symbol='VNINDEX', end_date=None, countback=252, return_summary=Fa
 def high_low_index(start_date, end_date=None):
     """
     Tính High-Low Index dựa trên 252 phiên (1 năm giao dịch) cho mỗi mã trong danh sách.
-    Đã được tối ưu hóa để tăng tốc độ xử lý và tránh rate limiting.
+    Đã được tối ưu hóa để tăng tốc độ xử lý.
 
     Args:
         start_date (str|datetime.date): ngày bắt đầu (YYYY-MM-DD hoặc datetime)
@@ -309,6 +259,10 @@ def high_low_index(start_date, end_date=None):
         print("Warning: Could not fetch stock symbols for High-Low Index")
         return pd.DataFrame(columns=['time', 'peak_count', 'trough_count', 'record_high_percent', 'hl_index'])
 
+    # Tối ưu: Xử lý song song các mã cổ phiếu với số lượng worker lớn hơn
+    from functools import partial
+    import threading
+    
     # Thread-safe counters
     peak_counts = Counter()
     trough_counts = Counter()
@@ -319,9 +273,6 @@ def high_low_index(start_date, end_date=None):
         local_peaks = []
         local_troughs = []
         try:
-            # Apply rate limiting before API call
-            _rate_limiter.wait()
-            
             # Lấy dữ liệu lịch sử với buffer đủ lớn để tính toán rolling window
             df = get_stock_history(symbol, count_back=252 * 3)
             if df.empty:
@@ -360,37 +311,26 @@ def high_low_index(start_date, end_date=None):
         except Exception:
             return None
     
-    # Xử lý theo batch để tránh rate limiting
-    # Giảm số worker xuống 5 và xử lý theo batch
-    batch_size = 20  # Số mã xử lý mỗi batch
-    max_workers = 5  # Giảm số worker xuống 5
-    
-    total_symbols = len(hose_list)
-    processed = 0
-    
-    for batch_start in range(0, total_symbols, batch_size):
-        batch_end = min(batch_start + batch_size, total_symbols)
-        batch_symbols = hose_list[batch_start:batch_end]
+    # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
+    max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit tất cả các task cùng lúc
+        futures = {executor.submit(process_stock, symbol, start, end): symbol for symbol in hose_list}
         
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(process_stock, symbol, start, end): symbol for symbol in batch_symbols}
-            
-            for future in as_completed(futures, timeout=180):
-                try:
-                    result = future.result(timeout=30)
-                    if result:
-                        local_peaks, local_troughs = result
-                        with counts_lock:
-                            for date in local_peaks:
-                                peak_counts[date] += 1
-                            for date in local_troughs:
-                                trough_counts[date] += 1
-                except Exception:
-                    continue
-        
-        # Delay giữa các batch để tránh rate limiting
-        if batch_end < total_symbols:
-            time.sleep(1)  # 1 giây delay giữa các batch
+        # Thu thập kết quả khi hoàn thành với timeout
+        for future in as_completed(futures, timeout=120):  # 2 minute timeout
+            try:
+                result = future.result(timeout=30)  # 30 second timeout per stock
+                if result:
+                    local_peaks, local_troughs = result
+                    # Thread-safe update of counters
+                    with counts_lock:
+                        for date in local_peaks:
+                            peak_counts[date] += 1
+                        for date in local_troughs:
+                            trough_counts[date] += 1
+            except Exception:
+                continue  # Skip failed stocks
 
     # Tạo DataFrame kết quả
     all_dates = sorted(set(list(peak_counts.keys()) + list(trough_counts.keys())))
@@ -535,7 +475,6 @@ def bpi(start_date, end_date=None):
     Đã được tối ưu hóa để tăng tốc độ xử lý và sửa lỗi logic:
     - Tăng count_back lên 200 để đảm bảo đủ dữ liệu cho EMA50
     - Tính total dựa trên số mã có EMA hợp lệ thay vì tổng mã giao dịch
-    - Thêm rate limiting và batch processing để tránh bị chặn API
     """
     if end_date is None:
         end_date = datetime.now().strftime('%Y-%m-%d')
@@ -551,6 +490,7 @@ def bpi(start_date, end_date=None):
     end_date_dt = pd.to_datetime(end_date)
     
     # Thread-safe counter
+    import threading
     bullish_counter = Counter()  # Đếm số mã có EMA20 > EMA50
     valid_ema_counter = Counter()  # Đếm số mã có EMA hợp lệ (đủ dữ liệu)
     counter_lock = threading.Lock()
@@ -562,9 +502,6 @@ def bpi(start_date, end_date=None):
         - dates where both EMA20 and EMA50 are valid (not NaN)
         """
         try:
-            # Apply rate limiting before API call
-            _rate_limiter.wait()
-            
             # Lấy dữ liệu lịch sử với buffer đủ lớn để tính toán EMA
             # Tăng count_back lên 200 để đảm bảo đủ dữ liệu cho EMA 50 ngày
             # EMA50 cần ít nhất 50 dữ liệu, nên cần buffer lớn hơn khoảng thời gian cần tính
@@ -599,37 +536,28 @@ def bpi(start_date, end_date=None):
         except Exception:
             return None, None
     
-    # Xử lý theo batch để tránh rate limiting
-    batch_size = 20  # Số mã xử lý mỗi batch
-    max_workers = 5  # Giảm số worker xuống 5
-    
-    total_symbols = len(hose_list)
-    
-    for batch_start in range(0, total_symbols, batch_size):
-        batch_end = min(batch_start + batch_size, total_symbols)
-        batch_symbols = hose_list[batch_start:batch_end]
+    # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
+    max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit tất cả các task cùng lúc
+        futures = {executor.submit(process_stock_for_bpi, symbol, start_date_dt, end_date_dt): symbol for symbol in hose_list}
         
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(process_stock_for_bpi, symbol, start_date_dt, end_date_dt): symbol for symbol in batch_symbols}
-            
-            for future in as_completed(futures, timeout=180):
-                try:
-                    result = future.result(timeout=30)
-                    if result:
-                        bullish_dates, valid_ema_dates = result
-                        with counter_lock:
-                            if bullish_dates:
-                                for date in bullish_dates:
-                                    bullish_counter[date] += 1
-                            if valid_ema_dates:
-                                for date in valid_ema_dates:
-                                    valid_ema_counter[date] += 1
-                except Exception:
-                    continue
-        
-        # Delay giữa các batch để tránh rate limiting
-        if batch_end < total_symbols:
-            time.sleep(1)  # 1 giây delay giữa các batch
+        # Xử lý kết quả khi các task hoàn thành với timeout
+        for future in as_completed(futures, timeout=180):  # 3 minute timeout
+            try:
+                result = future.result(timeout=30)  # 30 second timeout per stock
+                if result:
+                    bullish_dates, valid_ema_dates = result
+                    # Thread-safe update of counters
+                    with counter_lock:
+                        if bullish_dates:
+                            for date in bullish_dates:
+                                bullish_counter[date] += 1
+                        if valid_ema_dates:
+                            for date in valid_ema_dates:
+                                valid_ema_counter[date] += 1
+            except Exception:
+                continue  # Skip failed stocks
     
     # Tạo DataFrame từ các Counter
     if not bullish_counter and not valid_ema_counter:
