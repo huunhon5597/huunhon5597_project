@@ -471,7 +471,10 @@ def bpi(start_date, end_date=None):
     """
     Calculates the Bullish Percent Index (BPI) for stocks on the HOSE exchange.
     The BPI is the percentage of stocks that have their 20-day EMA above their 50-day EMA.
-    Đã được tối ưu hóa để tăng tốc độ xử lý.
+    
+    Đã được tối ưu hóa để tăng tốc độ xử lý và sửa lỗi logic:
+    - Tăng count_back lên 200 để đảm bảo đủ dữ liệu cho EMA50
+    - Tính total dựa trên số mã có EMA hợp lệ thay vì tổng mã giao dịch
     """
     if end_date is None:
         end_date = datetime.now().strftime('%Y-%m-%d')
@@ -488,17 +491,23 @@ def bpi(start_date, end_date=None):
     
     # Thread-safe counter
     import threading
-    date_counter = Counter()
+    bullish_counter = Counter()  # Đếm số mã có EMA20 > EMA50
+    valid_ema_counter = Counter()  # Đếm số mã có EMA hợp lệ (đủ dữ liệu)
     counter_lock = threading.Lock()
     
     def process_stock_for_bpi(symbol, start_date, end_date):
-        """Process a single stock and return dates where EMA20 > EMA50."""
+        """
+        Process a single stock and return:
+        - dates where EMA20 > EMA50 (bullish)
+        - dates where both EMA20 and EMA50 are valid (not NaN)
+        """
         try:
             # Lấy dữ liệu lịch sử với buffer đủ lớn để tính toán EMA
-            # Tăng count_back để đảm bảo đủ dữ liệu cho EMA 50 ngày
-            df = get_stock_history(symbol, count_back=100)
+            # Tăng count_back lên 200 để đảm bảo đủ dữ liệu cho EMA 50 ngày
+            # EMA50 cần ít nhất 50 dữ liệu, nên cần buffer lớn hơn khoảng thời gian cần tính
+            df = get_stock_history(symbol, count_back=200)
             if df.empty or 'close' not in df.columns or 'time' not in df.columns:
-                return None
+                return None, None
 
             # Tối ưu: Chỉ lấy các cột cần thiết và chuyển đổi dữ liệu một lần
             df = df[['time', 'close']].copy()
@@ -512,17 +521,20 @@ def bpi(start_date, end_date=None):
             # Tối ưu: Lọc dữ liệu trước khi xử lý
             df_filtered = df[(df['time'] >= start_date) & (df['time'] <= end_date)].copy()
             if df_filtered.empty:
-                return None
+                return None, None
             
-            # Tối ưu: Tìm các ngày có EMA20 > EMA50 một cách hiệu quả
-            ema_above_mask = df_filtered['ema20'] > df_filtered['ema50']
-            ema_above_dates = df_filtered.loc[ema_above_mask, 'time'].tolist()
+            # Tìm các ngày có EMA hợp lệ (cả EMA20 và EMA50 không phải NaN)
+            valid_ema_mask = df_filtered['ema20'].notna() & df_filtered['ema50'].notna()
+            valid_ema_dates = df_filtered.loc[valid_ema_mask, 'time'].tolist()
             
-            # Trả về danh sách các ngày để đếm
-            return ema_above_dates
+            # Tìm các ngày có EMA20 > EMA50 (trong số các ngày có EMA hợp lệ)
+            bullish_mask = valid_ema_mask & (df_filtered['ema20'] > df_filtered['ema50'])
+            bullish_dates = df_filtered.loc[bullish_mask, 'time'].tolist()
+            
+            return bullish_dates, valid_ema_dates
                 
         except Exception:
-            return None
+            return None, None
     
     # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
     max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
@@ -531,47 +543,40 @@ def bpi(start_date, end_date=None):
         futures = {executor.submit(process_stock_for_bpi, symbol, start_date_dt, end_date_dt): symbol for symbol in hose_list}
         
         # Xử lý kết quả khi các task hoàn thành với timeout
-        for future in as_completed(futures, timeout=120):  # 2 minute timeout
+        for future in as_completed(futures, timeout=180):  # 3 minute timeout
             try:
                 result = future.result(timeout=30)  # 30 second timeout per stock
                 if result:
-                    # Thread-safe update of counter
+                    bullish_dates, valid_ema_dates = result
+                    # Thread-safe update of counters
                     with counter_lock:
-                        for date in result:
-                            date_counter[date] += 1
+                        if bullish_dates:
+                            for date in bullish_dates:
+                                bullish_counter[date] += 1
+                        if valid_ema_dates:
+                            for date in valid_ema_dates:
+                                valid_ema_counter[date] += 1
             except Exception:
                 continue  # Skip failed stocks
     
-    # Tạo DataFrame từ Counter
-    if not date_counter:
-        ema_crossover_df = pd.DataFrame({'time': [], 'count': []})
-    else:
-        ema_crossover_df = pd.DataFrame.from_dict(date_counter, orient='index', columns=['count'])
-        ema_crossover_df.index.name = 'time'
-        ema_crossover_df = ema_crossover_df.reset_index()
-        ema_crossover_df = ema_crossover_df.sort_values('time')
-
-    # Use the existing market_breadth function to get total traded stocks
-    # Tối ưu: Cache kết quả market_breadth để tránh gọi lặp lại
-    breadth_df = market_breadth(start_date, end_date)
+    # Tạo DataFrame từ các Counter
+    if not bullish_counter and not valid_ema_counter:
+        return pd.DataFrame(columns=['time', 'count', 'total', 'bpi'])
     
-    if breadth_df.empty:
-        # If we can't get breadth, we can't calculate BPI. Return what we have.
-        bpi_df = ema_crossover_df
-        bpi_df['total'] = 0
-        bpi_df['bpi'] = 0.0
-        return bpi_df
-        
-    # Ensure time columns are compatible for merging
-    ema_crossover_df['time'] = pd.to_datetime(ema_crossover_df['time'])
-    breadth_df['time'] = pd.to_datetime(breadth_df['time'])
-
-    bpi_df = ema_crossover_df.merge(breadth_df[['time', 'total']], on='time', how='left')
-    bpi_df['total'] = bpi_df['total'].fillna(0)
+    # Lấy tất cả các ngày từ cả hai counter
+    all_dates = sorted(set(list(bullish_counter.keys()) + list(valid_ema_counter.keys())))
     
+    bpi_df = pd.DataFrame({'time': all_dates})
+    bpi_df['count'] = bpi_df['time'].map(lambda d: bullish_counter.get(d, 0))
+    bpi_df['total'] = bpi_df['time'].map(lambda d: valid_ema_counter.get(d, 0))
+    
+    # Tính BPI: chỉ tính khi total > 0
     bpi_df['bpi'] = 0.0
     mask = bpi_df['total'] > 0
     bpi_df.loc[mask, 'bpi'] = (bpi_df.loc[mask, 'count'] / bpi_df.loc[mask, 'total']) * 100
+    
+    # Convert time to string format for consistency
+    bpi_df['time'] = pd.to_datetime(bpi_df['time']).dt.strftime('%Y-%m-%d')
     
     return bpi_df
 
