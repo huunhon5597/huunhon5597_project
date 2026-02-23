@@ -6,3 +6,4 @@ streamlit-echarts
 pandas_ta
 arch
 numpy
+lxml
