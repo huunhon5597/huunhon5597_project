@@ -247,6 +247,10 @@ def investor_type(symbol='VN-Index', start_date=None, end_date=None):
             print(f"Lỗi khi lấy dữ liệu từ trang {page}: {e}")
             break
     
+    # Kiểm tra nếu không có dữ liệu
+    if all_data.empty:
+        return pd.DataFrame()
+    
     # Xử lý dataframe
     # 1. Xóa các cột có level 1 là 'GTGD khớp lệnh'
     if isinstance(all_data.columns, pd.MultiIndex):
