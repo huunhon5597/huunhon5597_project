@@ -113,63 +113,90 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
         return pd.DataFrame()
 
 # Cache for stock symbols - using a simple dict cache with TTL-like behavior
-_symbols_cache = None
-_symbols_cache_time = 0
+# Now caches by exchange to support multiple exchanges
+_symbols_cache_dict = {}
 _SYMBOLS_CACHE_TTL = 300  # 5 minutes cache TTL
 
-def get_stock_symbols(exchange="HOSE"):
-    """Get stock symbols list with caching to avoid repeated API calls."""
-    global _symbols_cache, _symbols_cache_time
+def get_stock_symbols(exchange='HOSE'):
+    """
+    Lấy danh sách mã cổ phiếu theo sàn giao dịch từ 24hmoney API.
     
-    # Check cache
+    Parameters:
+    -----------
+    exchange : str, default='HOSE'
+        Sàn giao dịch (HOSE, HNX, UPCOM)
+    
+    Returns:
+    --------
+    list
+        Danh sách các mã cổ phiếu (symbol có 3 ký tự)
+    """
+    global _symbols_cache_dict
+    
+    # Check cache for this specific exchange
     current_time = time.time()
-    if _symbols_cache is not None and (current_time - _symbols_cache_time) < _SYMBOLS_CACHE_TTL:
-        return _symbols_cache
+    cache_entry = _symbols_cache_dict.get(exchange)
+    if cache_entry is not None and (current_time - cache_entry['time']) < _SYMBOLS_CACHE_TTL:
+        return cache_entry['symbols']
     
-    url = "https://trading.vietcap.com.vn/api/price/v1/w/priceboard/tickers/price/group"
+    url = "https://api-finance-t19.24hmoney.vn/v1/ios/company/az?device_id=web1739193qgnab7r86yja22nscew0z4zvqnubixw0430303&device_name=INVALID&device_model=Windows+10&network_carrier=INVALID&connection_type=INVALID&os=Opera&os_version=127.0.0.0&access_token=INVALID&push_token=INVALID&locale=vi&browser_id=web1739193qgnab7r86yja22nscew0z4zvqnubixw0430303&industry_code=all&floor_code=all&com_type=all&letter=all&page=1&per_page=2000"
     
-    payload = json.dumps({"group": exchange})
     headers = {
-        'Accept': 'application/json, text/plain, */*',
-        'Content-Type': 'application/json',
-        'Device-Id': '194d5c0250f11306',
-        'Origin': 'https://trading.vietcap.com.vn',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+        'accept': 'application/json, text/plain, */*',
+        'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
+        'origin': 'https://24hmoney.vn',
+        'referer': 'https://24hmoney.vn/',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
     }
     
     session = _get_session()
     try:
-        response = session.post(url, headers=headers, data=payload, timeout=15)
+        response = session.get(url, headers=headers, timeout=15)
         if response.status_code != 200:
             print(f"Error fetching stock symbols: HTTP {response.status_code}")
-            return _symbols_cache if _symbols_cache is not None else []
+            cache_entry = _symbols_cache_dict.get(exchange)
+            return cache_entry['symbols'] if cache_entry else []
         
         # Check if response has content
         if not response.text or response.text.strip() == '':
             print("Error: Empty response from API")
-            return _symbols_cache if _symbols_cache is not None else []
+            cache_entry = _symbols_cache_dict.get(exchange)
+            return cache_entry['symbols'] if cache_entry else []
         
         json_data = response.json()
-        if not json_data:
-            print("Error: Empty JSON response")
-            return _symbols_cache if _symbols_cache is not None else []
+        if not json_data or 'data' not in json_data:
+            print("Error: Invalid JSON response")
+            cache_entry = _symbols_cache_dict.get(exchange)
+            return cache_entry['symbols'] if cache_entry else []
         
-        data = pd.DataFrame(json_data)
-        if data.empty or 's' not in data.columns:
+        temp_df = pd.DataFrame(json_data['data'])
+        if temp_df.empty or 'data' not in temp_df.columns:
             print("Error: No symbol data found")
-            return _symbols_cache if _symbols_cache is not None else []
+            cache_entry = _symbols_cache_dict.get(exchange)
+            return cache_entry['symbols'] if cache_entry else []
         
-        result = data['s'].sort_values().tolist()
-        # Only cache successful results
-        _symbols_cache = result
-        _symbols_cache_time = current_time
+        data = pd.DataFrame(temp_df['data'].tolist())
+        
+        # Filter symbols with 3 characters and by exchange
+        data = data[data['symbol'].str.len() == 3]
+        filtered_data = data[data['floor'] == exchange]
+        result = filtered_data['symbol'].sort_values().tolist()
+        
+        # Cache the result for this exchange
+        _symbols_cache_dict[exchange] = {
+            'symbols': result,
+            'time': current_time
+        }
+        
         return result
     except json.JSONDecodeError as e:
         print(f"JSON decode error: {e}")
-        return _symbols_cache if _symbols_cache is not None else []
+        cache_entry = _symbols_cache_dict.get(exchange)
+        return cache_entry['symbols'] if cache_entry else []
     except Exception as e:
         print(f"Error fetching stock symbols: {e}")
-        return _symbols_cache if _symbols_cache is not None else []
+        cache_entry = _symbols_cache_dict.get(exchange)
+        return cache_entry['symbols'] if cache_entry else []
 
 def investor_type(symbol='VN-Index', start_date=None, end_date=None):
     """
