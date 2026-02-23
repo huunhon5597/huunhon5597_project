@@ -4,6 +4,9 @@
 
 2. Thị trường
 - Tải dữ liệu nhanh hơn
+3. Cổ phiếu
+- Định giá PEG
 
-
+Phân loại nhà đầu tư uy tín hơn
 ***Streamlit app
+Tải dữ liệu nhanh hơn

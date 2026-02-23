@@ -2221,7 +2221,7 @@ elif main_menu == "Cổ phiếu":
         # Valuation -> PEG implementation
         with tab_peg:
             # Cached wrapper to avoid repeated API calls
-            @st.cache_data(ttl=3600)
+            @st.cache_data(ttl=300, show_spinner=False)  # 5 minutes cache for testing
             def cached_get_peg(symbol):
                 return get_peg(symbol)
 
@@ -2248,18 +2248,25 @@ elif main_menu == "Cổ phiếu":
                             else:
                                 # Extract data with validation
                                 try:
-                                    peg_value = float(peg_data['peg_ratio'])
-                                    pe_ratio = float(peg_data['pe_ratio'])
-                                    eps_growth = float(peg_data['eps_growth'])
-                                    filtered_data = peg_data['filtered_data']
-                                    
-                                    # Validate data values
-                                    if pd.isna(peg_value) or pd.isna(pe_ratio) or pd.isna(eps_growth):
-                                        st.warning("Dữ liệu tính PEG chứa giá trị không hợp lệ.")
+                                    # Check if required keys exist
+                                    if not all(k in peg_data for k in ['peg_ratio', 'pe_ratio', 'eps_growth']):
+                                        st.warning("Dữ liệu PEG không đầy đủ.")
+                                        st.info(f"Dữ liệu trả về: {peg_data}")
                                         continue_processing = False
                                     else:
-                                        # Data is valid, continue with processing
-                                        continue_processing = True
+                                        # Handle None values - convert to float safely
+                                        peg_value = float(peg_data['peg_ratio']) if peg_data['peg_ratio'] is not None else None
+                                        pe_ratio = float(peg_data['pe_ratio']) if peg_data['pe_ratio'] is not None else None
+                                        eps_growth = float(peg_data['eps_growth']) if peg_data['eps_growth'] is not None else None
+
+                                        # Validate data values
+                                        if peg_value is None or pe_ratio is None or eps_growth is None:
+                                            st.warning("Dữ liệu PEG chứa giá trị None. Có thể API không trả về đủ dữ liệu EPS.")
+                                            st.info(f"Chi tiết: {peg_data.get('note', 'Không có thông báo')}")
+                                            continue_processing = False
+                                        else:
+                                            # Data is valid, continue with processing
+                                            continue_processing = True
                                        
                                 except (KeyError, ValueError, TypeError) as e:
                                     st.error(f"Lỗi khi xử lý dữ liệu PEG: {e}")

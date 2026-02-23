@@ -1917,7 +1917,7 @@ elif main_menu == "Cổ phiếu":
     
     elif co_phieu_submenu == "Định giá":
         # Import valuation-related modules only when this menu is selected
-        from valuation.valuation import get_pb_pe, ref_pb, ref_pe, get_peg
+        from valuation.valuation import get_pb_pe, ref_pb_pe, get_peg
         
         st.header("📊 Định giá")
         
@@ -1969,259 +1969,354 @@ elif main_menu == "Cổ phiếu":
         
         # Create tabs for P/B, P/E, PEG, Features
         tab_pb, tab_pe, tab_peg, tab_features = st.tabs(["📊 P/B", "📈 P/E", "🎯 PEG", "⚡ Features"])
+        
+        # Initialize session state for storing charts
+        if 'pb_chart_data' not in st.session_state:
+            st.session_state.pb_chart_data = None
+        if 'pe_chart_data' not in st.session_state:
+            st.session_state.pe_chart_data = None
+        
+        # Cached wrapper for ref_pb_pe (shared between P/B and P/E tabs)
+        @st.cache_data(ttl=3600)
+        def cached_ref_pb_pe(symbol):
+            return ref_pb_pe(symbol)
+        
+        # Cached wrapper for get_pb_pe historical data
+        @st.cache_data(ttl=3600)
+        def cached_get_pb_pe(symbol, start_date=None, end_date=None):
+            return get_pb_pe(symbol, start_date=start_date, end_date=end_date)
+
+        # Function to display P/B chart from stored data
+        def display_pb_chart(pb_df, pb_ref, symbol):
+            fig_pb = go.Figure()
+            fig_pb.add_trace(go.Scatter(
+                x=pb_df['date'], y=pb_df['pb'], mode='lines+markers', name='P/B', line=dict(color='#1f77b4')
+            ))
+
+            # Normalize ref to a dict for easy access
+            thresholds = {}
+            if isinstance(pb_ref, pd.Series):
+                try:
+                    thresholds = dict(pb_ref.dropna())
+                except Exception:
+                    thresholds = dict(pb_ref)
+            elif isinstance(pb_ref, dict):
+                thresholds = {k: v for k, v in pb_ref.items() if v is not None}
+
+            # Display threshold metrics if available
+            if thresholds:
+                cols = st.columns(4)
+                keys_map = [
+                    ('pb_ttm_avg', 'PB TTM Avg'),
+                    ('pb_ttm_med', 'PB TTM Med'),
+                    ('pb_sec_avg', 'PB Sec Avg'),
+                    ('pb_sec_med', 'PB Sec Med'),
+                ]
+                for i, (k, label) in enumerate(keys_map):
+                    val = thresholds.get(k)
+                    if val is not None and not pd.isna(val):
+                        try:
+                            cols[i].metric(label, f"{float(val):.2f}")
+                        except Exception:
+                            cols[i].metric(label, str(val))
+
+                # draw horizontal lines for numeric thresholds and add annotations placed on the chart (not outside)
+                colors = ['#ff7f0e', '#d62728', '#2ca02c', '#9467bd']
+                ann_idx = 0
+                # Use the last available x (date) as base for annotations so they sit on-chart near the right edge.
+                last_x = pd.Timestamp(pb_df['date'].max())
+                # We'll place annotations above the plot area using paper coordinates (yref='paper').
+                # Stack them vertically so they do not overlap and do not cover series.
+                ann_y_start = 1.02
+                ann_y_step = 0.06
+                ann_x_paper = 0.98
+                for i, (k, label) in enumerate(keys_map):
+                    val = thresholds.get(k)
+                    if val is None:
+                        continue
+                    try:
+                        yv = float(val)
+                    except Exception:
+                        continue
+                    # add horizontal line (spans full x range)
+                    try:
+                        fig_pb.add_hline(y=yv, line_dash='dash', line_color=colors[i % len(colors)], layer='below')
+                    except Exception:
+                        fig_pb.add_shape(type='line', x0=pd.Timestamp(pb_df['date'].min()), x1=pd.Timestamp(pb_df['date'].max()), y0=yv, y1=yv, line=dict(color=colors[i % len(colors)], dash='dash'))
+
+                    # place annotation above the chart using paper coordinates so it doesn't cover data
+                    ann_y = ann_y_start + (ann_idx * ann_y_step)
+                    try:
+                        fig_pb.add_annotation(
+                            x=ann_x_paper,
+                            xref='paper',
+                            xanchor='right',
+                            y=ann_y,
+                            yref='paper',
+                            text=f"{label}: {yv:.2f}",
+                            showarrow=False,
+                            bgcolor=colors[i % len(colors)],
+                            bordercolor='rgba(0,0,0,0.1)',
+                            font={'color': 'white', 'size': 11},
+                            opacity=0.95
+                        )
+                        ann_idx += 1
+                    except Exception:
+                        pass
+
+                # increase top margin to make room for annotations above the plot
+                fig_pb.update_layout(margin=dict(r=120, t=120))
+
+            fig_pb.update_layout(title=f"P/B historical for {symbol}", xaxis_title='Date', yaxis_title='P/B', height=520, hovermode='x unified')
+            st.plotly_chart(fig_pb, width='stretch')
+
+            with st.expander("Xem dữ liệu P/B chi tiết"):
+                st.dataframe(pb_df.rename(columns={'date': 'time'}), width='stretch')
+                st.download_button("Tải xuống P/B CSV", pb_df.to_csv(index=False), f"pb_{symbol}.csv", "text/csv")
+
+        # Function to display P/E chart from stored data
+        def display_pe_chart(pe_df, pe_ref, symbol):
+            fig_pe = go.Figure()
+            # choose pe column candidate
+            pe_col = next((c for c in ['pe', 'pe_ttm', 'pe_latest'] if c in pe_df.columns), None)
+            if pe_col is None:
+                st.error("Không tìm thấy cột P/E trong dữ liệu trả về.")
+                return
+                
+            fig_pe.add_trace(go.Scatter(
+                x=pe_df['date'], y=pe_df[pe_col], mode='lines+markers', name='P/E', line=dict(color='#2ca02c')
+            ))
+
+            # Normalize ref to a dict for easy access
+            thresholds = {}
+            if isinstance(pe_ref, pd.Series):
+                try:
+                    thresholds = dict(pe_ref.dropna())
+                except Exception:
+                    thresholds = dict(pe_ref)
+            elif isinstance(pe_ref, dict):
+                thresholds = {k: v for k, v in pe_ref.items() if v is not None}
+
+            # Display threshold metrics if available
+            if thresholds:
+                cols = st.columns(4)
+                keys_map = [
+                    ('pe_ttm_avg', 'PE TTM Avg'),
+                    ('pe_ttm_med', 'PE TTM Med'),
+                    ('pe_sec_avg', 'PE Sec Avg'),
+                    ('pe_sec_med', 'PE Sec Med'),
+                ]
+                for i, (k, label) in enumerate(keys_map):
+                    val = thresholds.get(k)
+                    if val is not None and not pd.isna(val):
+                        try:
+                            cols[i].metric(label, f"{float(val):.2f}")
+                        except Exception:
+                            cols[i].metric(label, str(val))
+
+                # draw horizontal lines for numeric thresholds and add annotations above the chart
+                colors = ['#ff7f0e', '#d62728', '#1f77b4', '#9467bd']
+                ann_idx = 0
+                ann_y_start = 1.02
+                ann_y_step = 0.06
+                ann_x_paper = 0.98
+                for i, (k, label) in enumerate(keys_map):
+                    val = thresholds.get(k)
+                    if val is None:
+                        continue
+                    try:
+                        yv = float(val)
+                    except Exception:
+                        continue
+                    # add horizontal line (spans full x range)
+                    try:
+                        fig_pe.add_hline(y=yv, line_dash='dash', line_color=colors[i % len(colors)], layer='below')
+                    except Exception:
+                        fig_pe.add_shape(type='line', x0=pe_df['date'].min(), x1=pe_df['date'].max(), y0=yv, y1=yv, line=dict(color=colors[i % len(colors)], dash='dash'))
+
+                    # place annotation above the chart using paper coordinates so it doesn't cover data
+                    ann_y = ann_y_start + (ann_idx * ann_y_step)
+                    try:
+                        fig_pe.add_annotation(
+                            x=ann_x_paper,
+                            xref='paper',
+                            xanchor='right',
+                            y=ann_y,
+                            yref='paper',
+                            text=f"{label}: {yv:.2f}",
+                            showarrow=False,
+                            bgcolor=colors[i % len(colors)],
+                            bordercolor='rgba(0,0,0,0.1)',
+                            font={'color': 'white', 'size': 11},
+                            opacity=0.95
+                        )
+                        ann_idx += 1
+                    except Exception:
+                        pass
+
+                # increase top margin for annotations
+                fig_pe.update_layout(margin=dict(r=120, t=120))
+
+            fig_pe.update_layout(title=f"P/E historical for {symbol}", xaxis_title='Date', yaxis_title='P/E', height=520, hovermode='x unified')
+            st.plotly_chart(fig_pe, width='stretch')
+
+            with st.expander("Xem dữ liệu P/E chi tiết"):
+                st.dataframe(pe_df.rename(columns={'date': 'time'}), width='stretch')
+                st.download_button("Tải xuống P/E CSV", pe_df.to_csv(index=False), f"pe_{symbol}.csv", "text/csv")
 
         # Valuation -> P/B implementation
         with tab_pb:
-
-            # Cached wrappers to avoid repeated API calls
-            @st.cache_data(ttl=3600)
-            def cached_get_pb_pe(symbol, countback=252):
-                return get_pb_pe(symbol, countback=countback)
-
-            @st.cache_data(ttl=3600)
-            def cached_ref_pb(symbol):
-                return ref_pb(symbol)
-
             st.subheader("P/B: Historical series and benchmarks")
-            symbol = st.text_input("Mã cổ phiếu (ví dụ: VCI)", value="", max_chars=10, key="val_symbol_pb")
+            
+            # Create columns for symbol input and period selection
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                symbol_pb = st.text_input("Mã cổ phiếu (ví dụ: VCI)", value="", max_chars=10, key="val_symbol_pb")
+            with col2:
+                pb_period = st.selectbox(
+                    "Chọn khoảng thời gian",
+                    ["1 tháng", "3 tháng", "6 tháng", "1 năm", "2 năm", "Tùy chỉnh"],
+                    index=3,  # Default to "1 năm"
+                    key="pb_period"
+                )
+            
+            # If custom period is selected, show date inputs
+            if pb_period == "Tùy chỉnh":
+                pb_date_col1, pb_date_col2 = st.columns(2)
+                with pb_date_col1:
+                    pb_start_date = st.date_input(
+                        "Ngày bắt đầu",
+                        value=datetime.now().date() - timedelta(days=365),
+                        key="pb_start"
+                    )
+                with pb_date_col2:
+                    pb_end_date = st.date_input(
+                        "Ngày kết thúc",
+                        value=datetime.now().date(),
+                        key="pb_end"
+                    )
+            
+            # Display stored chart if exists
+            if st.session_state.pb_chart_data is not None:
+                stored_symbol, stored_period, stored_pb_df, stored_pb_ref = st.session_state.pb_chart_data
+                if stored_symbol == symbol_pb and stored_period == pb_period:
+                    display_pb_chart(stored_pb_df, stored_pb_ref, stored_symbol)
+            
             if st.button("Tải P/B", key="load_pb"):
-                if not symbol:
+                if not symbol_pb:
                     st.warning("Vui lòng nhập mã cổ phiếu.")
                 else:
-                    with st.spinner(f"Đang tải dữ liệu P/B cho {symbol}..."):
+                    with st.spinner(f"Đang tải dữ liệu P/B cho {symbol_pb}..."):
                         try:
-                            pb_df = cached_get_pb_pe(symbol, countback=252)
+                            # Get date range based on selected period
+                            if pb_period == "Tùy chỉnh":
+                                start_date = pb_start_date
+                                end_date = pb_end_date
+                            else:
+                                start_date, end_date = get_date_range(pb_period)
+                            
+                            pb_df = cached_get_pb_pe(symbol_pb, start_date=start_date.strftime('%Y-%m-%d'), end_date=end_date.strftime('%Y-%m-%d'))
                             if pb_df is None or pb_df.empty:
                                 st.warning("Không có dữ liệu P/B trả về cho cổ phiếu này.")
                             else:
                                 # normalize and sort
-                                pb_df['tradingDate'] = pd.to_datetime(pb_df['tradingDate'])
-                                pb_df = pb_df.sort_values('tradingDate')
+                                pb_df['date'] = pd.to_datetime(pb_df['date'])
+                                pb_df = pb_df.sort_values('date')
 
-                                fig_pb = go.Figure()
-                                fig_pb.add_trace(go.Scatter(
-                                    x=pb_df['tradingDate'], y=pb_df['pb'], mode='lines+markers', name='P/B', line=dict(color='#1f77b4')
-                                ))
-
-                                # get reference thresholds (show errors if they occur)
-                                ref = None
+                                # get reference thresholds using ref_pb_pe (shared function)
+                                pb_ref = None
                                 try:
-                                    ref = cached_ref_pb(symbol)
+                                    pb_ref, _ = cached_ref_pb_pe(symbol_pb)
                                 except Exception as e:
-                                    st.warning(f"Không lấy được giá trị tham chiếu từ ref_pb: {e}")
+                                    st.warning(f"Không lấy được giá trị tham chiếu từ ref_pb_pe: {e}")
 
-                                # Normalize ref to a dict for easy access
-                                thresholds = {}
-                                if isinstance(ref, pd.Series):
-                                    try:
-                                        thresholds = dict(ref.dropna())
-                                    except Exception:
-                                        thresholds = dict(ref)
-                                elif isinstance(ref, dict):
-                                    thresholds = {k: v for k, v in ref.items() if v is not None}
-
-                                # Display threshold metrics if available
-                                if thresholds:
-                                    cols = st.columns(4)
-                                    keys_map = [
-                                        ('pb_ttm_avg', 'PB TTM Avg'),
-                                        ('pb_ttm_med', 'PB TTM Med'),
-                                        ('pb_sec_avg', 'PB Sec Avg'),
-                                        ('pb_sec_med', 'PB Sec Med'),
-                                    ]
-                                    for i, (k, label) in enumerate(keys_map):
-                                        val = thresholds.get(k)
-                                        if val is not None and not pd.isna(val):
-                                            try:
-                                                cols[i].metric(label, f"{float(val):.2f}")
-                                            except Exception:
-                                                cols[i].metric(label, str(val))
-
-                                    # draw horizontal lines for numeric thresholds and add annotations placed on the chart (not outside)
-                                    colors = ['#ff7f0e', '#d62728', '#2ca02c', '#9467bd']
-                                    ann_idx = 0
-                                    # Use the last available x (date) as base for annotations so they sit on-chart near the right edge.
-                                    last_x = pd.Timestamp(pb_df['tradingDate'].max())
-                                    # We'll place annotations above the plot area using paper coordinates (yref='paper').
-                                    # Stack them vertically so they do not overlap and do not cover series.
-                                    ann_y_start = 1.02
-                                    ann_y_step = 0.06
-                                    ann_x_paper = 0.98
-                                    for i, (k, label) in enumerate(keys_map):
-                                        val = thresholds.get(k)
-                                        if val is None:
-                                            continue
-                                        try:
-                                            yv = float(val)
-                                        except Exception:
-                                            continue
-                                        # add horizontal line (spans full x range)
-                                        try:
-                                            fig_pb.add_hline(y=yv, line_dash='dash', line_color=colors[i % len(colors)], layer='below')
-                                        except Exception:
-                                            fig_pb.add_shape(type='line', x0=pd.Timestamp(pb_df['tradingDate'].min()), x1=pd.Timestamp(pb_df['tradingDate'].max()), y0=yv, y1=yv, line=dict(color=colors[i % len(colors)], dash='dash'))
-
-                                        # place annotation above the chart using paper coordinates so it doesn't cover data
-                                        ann_y = ann_y_start + (ann_idx * ann_y_step)
-                                        try:
-                                            fig_pb.add_annotation(
-                                                x=ann_x_paper,
-                                                xref='paper',
-                                                xanchor='right',
-                                                y=ann_y,
-                                                yref='paper',
-                                                text=f"{label}: {yv:.2f}",
-                                                showarrow=False,
-                                                bgcolor=colors[i % len(colors)],
-                                                bordercolor='rgba(0,0,0,0.1)',
-                                                font={'color': 'white', 'size': 11},
-                                                opacity=0.95
-                                            )
-                                            ann_idx += 1
-                                        except Exception:
-                                            pass
-
-                                    # increase top margin to make room for annotations above the plot
-                                    fig_pb.update_layout(margin=dict(r=120, t=120))
-
-                                fig_pb.update_layout(title=f"P/B historical for {symbol}", xaxis_title='Date', yaxis_title='P/B', height=520, hovermode='x unified')
-                                st.plotly_chart(fig_pb, width='stretch')
-
-                                with st.expander("Xem dữ liệu P/B chi tiết"):
-                                    st.dataframe(pb_df.rename(columns={'tradingDate': 'time'}), width='stretch')
-                                    st.download_button("Tải xuống P/B CSV", pb_df.to_csv(index=False), f"pb_{symbol}.csv", "text/csv")
+                                # Store in session state (include period)
+                                st.session_state.pb_chart_data = (symbol_pb, pb_period, pb_df, pb_ref)
+                                
+                                # Display the chart
+                                display_pb_chart(pb_df, pb_ref, symbol_pb)
                         except Exception as e:
                             st.error(f"Lỗi khi tải dữ liệu P/B: {e}")
 
         # Valuation -> P/E implementation
         with tab_pe:
-
-            # Cached wrappers to avoid repeated API calls
-            @st.cache_data(ttl=3600)
-            def cached_get_pb_pe_for_pe(symbol, countback=252):
-                return get_pb_pe(symbol, countback=countback)
-
-            @st.cache_data(ttl=3600)
-            def cached_ref_pe(symbol):
-                return ref_pe(symbol)
-
             st.subheader("P/E: Historical series and benchmarks")
-            # reuse same symbol input so user doesn't need to retype when switching tabs
-            symbol = st.text_input("Mã cổ phiếu (ví dụ: VCI)", value="", max_chars=10, key="val_symbol_pe")
+            
+            # Create columns for symbol input and period selection
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                # reuse same symbol input so user doesn't need to retype when switching tabs
+                symbol_pe = st.text_input("Mã cổ phiếu (ví dụ: VCI)", value="", max_chars=10, key="val_symbol_pe")
+            with col2:
+                pe_period = st.selectbox(
+                    "Chọn khoảng thời gian",
+                    ["1 tháng", "3 tháng", "6 tháng", "1 năm", "2 năm", "Tùy chỉnh"],
+                    index=3,  # Default to "1 năm"
+                    key="pe_period"
+                )
+            
+            # If custom period is selected, show date inputs
+            if pe_period == "Tùy chỉnh":
+                pe_date_col1, pe_date_col2 = st.columns(2)
+                with pe_date_col1:
+                    pe_start_date = st.date_input(
+                        "Ngày bắt đầu",
+                        value=datetime.now().date() - timedelta(days=365),
+                        key="pe_start"
+                    )
+                with pe_date_col2:
+                    pe_end_date = st.date_input(
+                        "Ngày kết thúc",
+                        value=datetime.now().date(),
+                        key="pe_end"
+                    )
+            
+            # Display stored chart if exists
+            if st.session_state.pe_chart_data is not None:
+                stored_symbol, stored_period, stored_pe_df, stored_pe_ref = st.session_state.pe_chart_data
+                if stored_symbol == symbol_pe and stored_period == pe_period:
+                    display_pe_chart(stored_pe_df, stored_pe_ref, stored_symbol)
+            
             if st.button("Tải P/E", key="load_pe"):
-                if not symbol:
+                if not symbol_pe:
                     st.warning("Vui lòng nhập mã cổ phiếu.")
                 else:
-                    with st.spinner(f"Đang tải dữ liệu P/E cho {symbol}..."):
+                    with st.spinner(f"Đang tải dữ liệu P/E cho {symbol_pe}..."):
                         try:
-                            pe_df = cached_get_pb_pe_for_pe(symbol, countback=252)
+                            # Get date range based on selected period
+                            if pe_period == "Tùy chỉnh":
+                                start_date = pe_start_date
+                                end_date = pe_end_date
+                            else:
+                                start_date, end_date = get_date_range(pe_period)
+                            
+                            pe_df = cached_get_pb_pe(symbol_pe, start_date=start_date.strftime('%Y-%m-%d'), end_date=end_date.strftime('%Y-%m-%d'))
                             if pe_df is None or pe_df.empty:
                                 st.warning("Không có dữ liệu P/E trả về cho cổ phiếu này.")
                             else:
                                 # normalize and sort
-                                pe_df['tradingDate'] = pd.to_datetime(pe_df['tradingDate'])
-                                pe_df = pe_df.sort_values('tradingDate')
+                                pe_df['date'] = pd.to_datetime(pe_df['date'])
+                                pe_df = pe_df.sort_values('date')
 
-                                fig_pe = go.Figure()
-                                # choose pe column candidate
-                                pe_col = next((c for c in ['pe', 'pe_ttm', 'pe_latest'] if c in pe_df.columns), None)
-                                if pe_col is None:
-                                    st.error("Không tìm thấy cột P/E trong dữ liệu trả về.")
-                                else:
-                                    fig_pe.add_trace(go.Scatter(
-                                        x=pe_df['tradingDate'], y=pe_df[pe_col], mode='lines+markers', name='P/E', line=dict(color='#2ca02c')
-                                    ))
+                                # get reference thresholds using ref_pb_pe (shared function)
+                                pe_ref = None
+                                try:
+                                    _, pe_ref = cached_ref_pb_pe(symbol_pe)
+                                except Exception as e:
+                                    st.warning(f"Không lấy được giá trị tham chiếu từ ref_pb_pe: {e}")
 
-                                    # get reference thresholds (show errors if they occur)
-                                    ref = None
-                                    try:
-                                        ref = cached_ref_pe(symbol)
-                                    except Exception as e:
-                                        st.warning(f"Không lấy được giá trị tham chiếu từ ref_pe: {e}")
-
-                                    # Normalize ref to a dict for easy access
-                                    thresholds = {}
-                                    if isinstance(ref, pd.Series):
-                                        try:
-                                            thresholds = dict(ref.dropna())
-                                        except Exception:
-                                            thresholds = dict(ref)
-                                    elif isinstance(ref, dict):
-                                        thresholds = {k: v for k, v in ref.items() if v is not None}
-
-                                    # Display threshold metrics if available
-                                    if thresholds:
-                                        cols = st.columns(4)
-                                        keys_map = [
-                                            ('pe_ttm_avg', 'PE TTM Avg'),
-                                            ('pe_ttm_med', 'PE TTM Med'),
-                                            ('pe_sec_avg', 'PE Sec Avg'),
-                                            ('pe_sec_med', 'PE Sec Med'),
-                                        ]
-                                        for i, (k, label) in enumerate(keys_map):
-                                            val = thresholds.get(k)
-                                            if val is not None and not pd.isna(val):
-                                                try:
-                                                    cols[i].metric(label, f"{float(val):.2f}")
-                                                except Exception:
-                                                    cols[i].metric(label, str(val))
-
-                                        # draw horizontal lines for numeric thresholds and add annotations above the chart
-                                        colors = ['#ff7f0e', '#d62728', '#1f77b4', '#9467bd']
-                                        ann_idx = 0
-                                        ann_y_start = 1.02
-                                        ann_y_step = 0.06
-                                        ann_x_paper = 0.98
-                                        for i, (k, label) in enumerate(keys_map):
-                                            val = thresholds.get(k)
-                                            if val is None:
-                                                continue
-                                            try:
-                                                yv = float(val)
-                                            except Exception:
-                                                continue
-                                            # add horizontal line (spans full x range)
-                                            try:
-                                                fig_pe.add_hline(y=yv, line_dash='dash', line_color=colors[i % len(colors)], layer='below')
-                                            except Exception:
-                                                fig_pe.add_shape(type='line', x0=pe_df['tradingDate'].min(), x1=pe_df['tradingDate'].max(), y0=yv, y1=yv, line=dict(color=colors[i % len(colors)], dash='dash'))
-
-                                            # place annotation above the chart using paper coordinates so it doesn't cover data
-                                            ann_y = ann_y_start + (ann_idx * ann_y_step)
-                                            try:
-                                                fig_pe.add_annotation(
-                                                    x=ann_x_paper,
-                                                    xref='paper',
-                                                    xanchor='right',
-                                                    y=ann_y,
-                                                    yref='paper',
-                                                    text=f"{label}: {yv:.2f}",
-                                                    showarrow=False,
-                                                    bgcolor=colors[i % len(colors)],
-                                                    bordercolor='rgba(0,0,0,0.1)',
-                                                    font={'color': 'white', 'size': 11},
-                                                    opacity=0.95
-                                                )
-                                                ann_idx += 1
-                                            except Exception:
-                                                pass
-
-                                        # increase top/right margin to make room for annotations above the plot
-                                        fig_pe.update_layout(margin=dict(r=120, t=120))
-
-                                    fig_pe.update_layout(title=f"P/E historical for {symbol}", xaxis_title='Date', yaxis_title='P/E', height=520, hovermode='x unified')
-                                    st.plotly_chart(fig_pe, width='stretch')
-
-                                    with st.expander("Xem dữ liệu P/E chi tiết"):
-                                        st.dataframe(pe_df.rename(columns={'tradingDate': 'time'}), width='stretch')
-                                        st.download_button("Tải xuống P/E CSV", pe_df.to_csv(index=False), f"pe_{symbol}.csv", "text/csv")
+                                # Store in session state (include period)
+                                st.session_state.pe_chart_data = (symbol_pe, pe_period, pe_df, pe_ref)
+                                
+                                # Display the chart
+                                display_pe_chart(pe_df, pe_ref, symbol_pe)
                         except Exception as e:
                             st.error(f"Lỗi khi tải dữ liệu P/E: {e}")
 
         # Valuation -> PEG implementation
         with tab_peg:
             # Cached wrapper to avoid repeated API calls
-            @st.cache_data(ttl=3600)
+            @st.cache_data(ttl=300, show_spinner=False)  # 5 minutes cache for testing
             def cached_get_peg(symbol):
                 return get_peg(symbol)
 
@@ -2248,18 +2343,29 @@ elif main_menu == "Cổ phiếu":
                             else:
                                 # Extract data with validation
                                 try:
-                                    peg_value = float(peg_data['peg_ratio'])
-                                    pe_ratio = float(peg_data['pe_ratio'])
-                                    eps_growth = float(peg_data['eps_growth'])
-                                    filtered_data = peg_data['filtered_data']
-                                    
-                                    # Validate data values
-                                    if pd.isna(peg_value) or pd.isna(pe_ratio) or pd.isna(eps_growth):
-                                        st.warning("Dữ liệu tính PEG chứa giá trị không hợp lệ.")
+                                    # Check if required keys exist
+                                    if not all(k in peg_data for k in ['peg_ratio', 'pe_ratio', 'eps_growth']):
+                                        st.warning("Dữ liệu PEG không đầy đủ.")
+                                        st.info(f"Dữ liệu trả về: {peg_data}")
                                         continue_processing = False
                                     else:
-                                        # Data is valid, continue with processing
-                                        continue_processing = True
+                                        # Handle None values - convert to float safely
+                                        peg_value = float(peg_data['peg_ratio']) if peg_data['peg_ratio'] is not None else None
+                                        pe_ratio = float(peg_data['pe_ratio']) if peg_data['pe_ratio'] is not None else None
+                                        eps_growth = float(peg_data['eps_growth']) if peg_data['eps_growth'] is not None else None
+
+                                        # Validate data values
+                                        if peg_value is None or pe_ratio is None or eps_growth is None:
+                                            st.warning("Dữ liệu PEG chứa giá trị None. Có thể API không trả về đủ dữ liệu EPS.")
+                                            st.info(f"Chi tiết: {peg_data.get('note', 'Không có thông báo')}")
+                                            
+                                            # Show debug info
+                                            with st.expander("Debug: Xem chi tiết lỗi"):
+                                                st.write("PEG Data trả về:", peg_data)
+                                            continue_processing = False
+                                        else:
+                                            # Data is valid, continue with processing
+                                            continue_processing = True
                                        
                                 except (KeyError, ValueError, TypeError) as e:
                                     st.error(f"Lỗi khi xử lý dữ liệu PEG: {e}")
@@ -2267,58 +2373,67 @@ elif main_menu == "Cổ phiếu":
                                 
                             # Only proceed with display if data is valid
                             if continue_processing:
-                                # Create gauge chart for PEG
-                                fig_gauge = go.Figure()
+                                # Check if EPS growth is positive for PEG interpretation
+                                eps_growth_positive = eps_growth > 0
                                 
-                                # Define ranges for PEG interpretation
-                                colors = ['#2ecc71', '#3498db', '#e74c3c']  # Green, Blue, Red
-                                
-                                # Create the gauge
-                                fig_gauge.add_trace(go.Indicator(
-                                    mode="gauge+number+delta",
-                                    value=peg_value,
-                                    domain={'x': [0, 1], 'y': [0, 1]},
-                                    title={'text': "PEG Ratio"},
-                                    delta={'reference': 1.5, 'increasing': {'color': "red"}, 'decreasing': {'color': "green"}},
-                                    gauge={
-                                        'axis': {'range': [0, 3], 'dtick': 0.5},
-                                        'bar': {'color': "darkblue"},
-                                        'steps': [
-                                            {'range': [0, 1], 'color': colors[0], 'name': 'Undervalued'},
-                                            {'range': [1, 2], 'color': colors[1], 'name': 'Fairly Valued'},
-                                            {'range': [2, 3], 'color': colors[2], 'name': 'Overvalued'}
-                                        ],
-                                        'threshold': {
-                                            'line': {'color': "red", 'width': 4},
-                                            'thickness': 0.75,
-                                            'value': 2
+                                # Only show gauge chart if EPS growth is positive
+                                if eps_growth_positive:
+                                    # Create gauge chart for PEG
+                                    fig_gauge = go.Figure()
+                                    
+                                    # Define ranges for PEG interpretation
+                                    colors = ['#2ecc71', '#3498db', '#e74c3c']  # Green, Blue, Red
+                                    
+                                    # Create the gauge
+                                    fig_gauge.add_trace(go.Indicator(
+                                        mode="gauge+number+delta",
+                                        value=peg_value,
+                                        domain={'x': [0, 1], 'y': [0, 1]},
+                                        title={'text': "PEG Ratio"},
+                                        delta={'reference': 1.5, 'increasing': {'color': "red"}, 'decreasing': {'color': "green"}},
+                                        gauge={
+                                            'axis': {'range': [0, 3], 'dtick': 0.5},
+                                            'bar': {'color': "darkblue"},
+                                            'steps': [
+                                                {'range': [0, 1], 'color': colors[0], 'name': 'Undervalued'},
+                                                {'range': [1, 2], 'color': colors[1], 'name': 'Fairly Valued'},
+                                                {'range': [2, 3], 'color': colors[2], 'name': 'Overvalued'}
+                                            ],
+                                            'threshold': {
+                                                'line': {'color': "red", 'width': 4},
+                                                'thickness': 0.75,
+                                                'value': 2
+                                            }
                                         }
-                                    }
-                                ))
-                                
-                                # Add interpretation text
-                                if peg_value < 1:
-                                    interpretation = "Cổ phiếu có thể đang bị định giá thấp"
-                                    color = "green"
-                                elif peg_value <= 2:
-                                    interpretation = "Cổ phiếu được định giá hợp lý"
-                                    color = "blue"
+                                    ))
+                                    
+                                    # Add interpretation text
+                                    if peg_value < 1:
+                                        interpretation = "Cổ phiếu có thể đang bị định giá thấp"
+                                        color = "green"
+                                    elif peg_value <= 2:
+                                        interpretation = "Cổ phiếu được định giá hợp lý"
+                                        color = "blue"
+                                    else:
+                                        interpretation = "Cổ phiếu có thể đang bị định giá cao"
+                                        color = "red"
+                                    
+                                    st.plotly_chart(fig_gauge, width='stretch')
+                                    
+                                    # Display interpretation
+                                    st.markdown(f"<p style='color:{color}; font-size: 18px; font-weight: bold;'>{interpretation}</p>", unsafe_allow_html=True)
+                                    
+                                    # Display additional information
+                                    col1, col2, col3 = st.columns(3)
+                                    col1.metric("PEG Ratio", f"{peg_value:.2f}")
+                                    col2.metric("Ngưỡng hợp lý", "1.5")
+                                    col3.metric("Ngưỡng cảnh báo", "2.0")
                                 else:
-                                    interpretation = "Cổ phiếu có thể đang bị định giá cao"
-                                    color = "red"
+                                    # EPS growth is negative - show warning
+                                    st.warning("⚠️ Tăng trưởng EPS âm - Không thể tính PEG có ý nghĩa")
+                                    st.info("PEG chỉ có ý nghĩa khi công ty có tốc độ tăng trưởng EPS dương. Với EPS growth âm, PEG sẽ không phản ánh đúng giá trị định giá.")
                                 
-                                st.plotly_chart(fig_gauge, width='stretch')
-                                
-                                # Display interpretation
-                                st.markdown(f"<p style='color:{color}; font-size: 18px; font-weight: bold;'>{interpretation}</p>", unsafe_allow_html=True)
-                                
-                                # Display additional information
-                                col1, col2, col3 = st.columns(3)
-                                col1.metric("PEG Ratio", f"{peg_value:.2f}")
-                                col2.metric("Ngưỡng hợp lý", "1.5")
-                                col3.metric("Ngưỡng cảnh báo", "2.0")
-                                
-                                # Add data section below the gauge
+                                # Add data section below the gauge (show for both cases)
                                 st.subheader("📊 Dữ liệu chi tiết")
                                 
                                 # Create columns for key metrics
@@ -2326,31 +2441,22 @@ elif main_menu == "Cổ phiếu":
                                 
                                 # Display key metrics
                                 data_col1.metric("P/E gần nhất", f"{pe_ratio:.2f}")
-                                data_col2.metric("Tăng trưởng EPS dự báo", f"{(eps_growth * 100):.2f}%")
-                                data_col3.metric("Nguồn dữ liệu", "Vietcap")
-                                
-                                # Display forecast data table
-                                if filtered_data is not None and not filtered_data.empty:
-                                    try:
-                                        st.write("**Dữ liệu dự báo EPS tăng trưởng:**")
-                                        # Format the index to show period names
-                                        display_data = filtered_data.copy()
-                                        display_data.index = display_data.index.astype(str)
-                                        display_data = display_data[['epsgrowth']]
-                                        display_data.columns = ['Tăng trưởng EPS (%)']
-                                        st.dataframe(display_data.style.format({'Tăng trưởng EPS (%)': '{:.2f}'}), width='stretch')
-                                    except Exception as e:
-                                        st.warning(f"Không thể hiển thị bảng dữ liệu dự báo: {e}")
+                                data_col2.metric("Tăng trưởng EPS dự báo", f"{eps_growth * 100:.2f}%")
+                                # Get additional data from peg_data
+                                eps_current = peg_data.get('eps_current')
+                                eps_forward = peg_data.get('eps_forward')
+                                if eps_current is not None and eps_forward is not None:
+                                    data_col3.metric("EPS hiện tại / dự phóng", f"{float(eps_current):.0f} / {float(eps_forward):.0f}")
                                 else:
-                                    st.info("Không có dữ liệu dự báo EPS để hiển thị")
+                                    data_col3.metric("Nguồn dữ liệu", "FiinFundamental")
                                 
                                 # Add explanation
                                 with st.expander("Giải thích PEG"):
                                     st.markdown("""
-                                    **PEG (Price/Earnings to Growth)** là chỉ số đánh giá giá trị của cổ phiếu so với tốc độ tăng trưởng lợi nhuận。
+                                    **PEG (Price/Earnings to Growth)** là chỉ số đánh giá giá trị của cổ phiếu so với tốc độ tăng trưởng lợi nhuận.
                                     
                                     **Công thức:** PEG = P/E / Tốc độ tăng trưởng EPS (%)
-                                                                     
+                                                                    
                                     **Giải thích:**
                                     - **PEG < 1:** Cổ phiếu có thể bị định giá thấp
                                     - **1 ≤ PEG ≤ 2:** Cổ phiếu được định giá hợp lý
