@@ -1,3 +1,4 @@
+***General
 1. Trang chủ
 - Các nút hành động nhanh
 
@@ -5,3 +6,4 @@
 - Tải dữ liệu nhanh hơn
 
 
+***Streamlit app

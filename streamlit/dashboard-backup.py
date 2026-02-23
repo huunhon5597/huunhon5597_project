@@ -3133,6 +3133,6 @@ elif main_menu == "Cổ phiếu":
     
 
 # --- Polling for Rerun ---
-if st.session_state.jobs:
+if "jobs" in st.session_state and st.session_state.jobs:
     time.sleep(1)
     st.rerun()
