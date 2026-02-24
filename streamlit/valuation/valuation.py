@@ -282,6 +282,12 @@ def get_peg(symbol):
         
         print(f"Vietcap API status: {response.status_code}")
         
+        if response.status_code == 403:
+            import streamlit as st
+            st.error("Bị chặn rồi!")
+            st.write(response.headers)  # Xem server trả về là gì (Cloudflare, Nginx, hay Vietcap)
+            st.code(response.text[:500])  # Xem 500 ký tự đầu của trang lỗi
+        
         if response.status_code != 200:
             print(f"Vietcap API returned status {response.status_code}")
             return {
