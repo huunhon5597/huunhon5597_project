@@ -2355,16 +2355,16 @@ elif main_menu == "Cổ phiếu":
                                         eps_growth = float(peg_data['eps_growth']) if peg_data['eps_growth'] is not None else None
 
                                         # Validate data values
-                                        if peg_value is None or pe_ratio is None or eps_growth is None:
-                                            st.warning("Dữ liệu PEG chứa giá trị None. Có thể API không trả về đủ dữ liệu EPS.")
-                                            st.info(f"Chi tiết: {peg_data.get('note', 'Không có thông báo')}")
-                                            
-                                            # Show debug info for 403 error
-                                            if peg_data.get('error_info'):
-                                                error_info = peg_data['error_info']
-                                                st.error("Bị chặn rồi!")
-                                                st.write("Headers:", error_info.get('headers', {}))  # Xem server trả về là gì
-                                                st.code(error_info.get('text', '')[:500])  # Xem 500 ký tự đầu của trang lỗi
+                                        if peg_value is None:
+                                            # PEG is None - check if it's due to negative growth or missing data
+                                            note = peg_data.get('note', '')
+                                            if 'âm' in note:
+                                                # EPS growth is negative - show specific message
+                                                st.warning(note)
+                                            else:
+                                                # Missing or invalid data
+                                                st.warning("Dữ liệu PEG không hợp lệ. Có thể API không trả về đủ dữ liệu EPS.")
+                                                st.info(f"Chi tiết: {note}")
                                             
                                             # Show debug info
                                             with st.expander("Debug: Xem chi tiết lỗi"):

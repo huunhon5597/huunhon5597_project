@@ -266,50 +266,43 @@ def get_peg(symbol):
                 'note': f'Lỗi lấy token: {e}'
             }
         
-        # Get EPS growth from Vietcap API
-        url = f"https://iq.vietcap.com.vn/api/iq-insight-service/v2/company/{symbol}/financial-data"
+        # Get EPS from FiinTrade API
+        url = f"https://wl-fundamental.fiintrade.vn/Snapshot/GetSnapshot?language=vi&OrganCode={symbol}"
         
         headers = {
-            'Accept': 'application/json',
-            'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
-            'Authorization': f'Bearer {token}',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
             'Connection': 'keep-alive',
-            'Content-Type': 'application/json',
-            'Origin': 'https://trading.vietcap.com.vn',
-            'Referer': 'https://trading.vietcap.com.vn/iq/coverage?login-from=individual',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
-            'client-id': 'a670914c-8964-4b2c-a289-6de4d5b9d2c4',
-            'client-secret': '42IGbQ9oXZ1p2JK',
-            'device-id': '194d5c0250f11306',
-            'grant-type': 'password',
+            'Origin': 'https://app-kafi.fiintrade.vn',
+            'Referer': 'https://app-kafi.fiintrade.vn/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
+            'sec-ch-ua': '"Opera GX";v="127", "Chromium";v="143", "Not A(Brand";v="24"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"'
         }
         
         session = _get_session()
         response = session.get(url, headers=headers, timeout=15)
         
-        print(f"Vietcap API status: {response.status_code}")
+        print(f"FiinTrade API status: {response.status_code}")
         
         if response.status_code != 200:
-            # Store 403 error info for debugging
-            error_info = {
-                'status_code': response.status_code,
-                'headers': dict(response.headers),
-                'text': response.text[:500] if response.text else ''
-            }
-            print(f"Vietcap API error info: {error_info}")
+            print(f"FiinTrade API returned status {response.status_code}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
                 'eps_current': None,
                 'eps_forward': None,
                 'eps_growth': None,
-                'note': f'API returned status {response.status_code}',
-                'error_info': error_info
+                'note': f'API returned status {response.status_code}'
             }
         
         response_data = response.json()
         
-        if 'data' not in response_data:
+        if 'items' not in response_data:
             print(f"Không tìm thấy dữ liệu cho {symbol}")
             return {
                 'peg_ratio': None,
@@ -320,7 +313,7 @@ def get_peg(symbol):
                 'note': 'No data in API response'
             }
         
-        data = pd.DataFrame(response_data['data'])
+        data = pd.DataFrame(response_data['items'])
         
         if data.empty:
             print(f"Dữ liệu trống cho {symbol}")
@@ -333,96 +326,70 @@ def get_peg(symbol):
                 'note': 'Empty data from API'
             }
         
-        # Set index to string to filter forecast data
-        data.index = data.index.astype(str)
-        data = data[data.index.str.contains('F', na=False)]
-        
-        # Filter by year - current year and next year (or just next year if after October)
-        now = datetime.datetime.now()
-        year = now.year
-        month = now.month
-        years_allowed = [str(year), str(year + 1)] if month < 10 else [str(year + 1)]
-        data = data[data.index.str[:4].isin(years_allowed)]
-        
-        if data.empty:
-            print(f"Không có dữ liệu dự phóng (Forecast) phù hợp cho {symbol}")
+        # Get summary column
+        if 'summary' not in data.columns:
+            print(f"Không tìm thấy cột 'summary' trong dữ liệu cho {symbol}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
                 'eps_current': None,
                 'eps_forward': None,
                 'eps_growth': None,
-                'note': 'No forecast data available'
+                'note': 'No summary column in data'
             }
         
-        # Check for epsgrowth column
-        if 'epsgrowth' not in data.columns:
-            print(f"Không tìm thấy cột 'epsgrowth' trong dữ liệu cho {symbol}")
-            print(f"Các cột có sẵn: {data.columns.tolist()}")
+        # Convert the summary data to DataFrame
+        summary_data = pd.DataFrame(data['summary'].tolist())
+        
+        # Get EPS values: rtd14 = EPS hiện tại (TTM), rtd53 = EPS forward
+        eps_current = summary_data['rtd14'].iloc[0] if 'rtd14' in summary_data.columns else None
+        eps_forward = summary_data['rtd53'].iloc[0] if 'rtd53' in summary_data.columns else None
+        
+        print(f"EPS hiện tại: {eps_current}, EPS forward: {eps_forward}")
+        
+        if eps_current is None or pd.isna(eps_current):
+            print(f"Không có EPS hiện tại cho {symbol}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
                 'eps_current': None,
-                'eps_forward': None,
+                'eps_forward': eps_forward,
                 'eps_growth': None,
-                'note': 'No epsgrowth column in data'
+                'note': 'No current EPS available'
             }
         
-        # Get EPS growth value
-        epsgrowth_series = data['epsgrowth'].dropna()
-        if epsgrowth_series.empty:
-            print(f"Không có giá trị epsgrowth hợp lệ cho {symbol}")
-            return {
-                'peg_ratio': None,
-                'pe_ratio': pe,
-                'eps_current': None,
-                'eps_forward': None,
-                'eps_growth': None,
-                'note': 'No valid EPS growth value'
-            }
+        # Calculate EPS growth if we have both current and forward EPS
+        eps_growth_pct = None
+        note = ''
         
-        if len(epsgrowth_series) > 1:
-            eps_growth = epsgrowth_series.mean()
-        else:
-            eps_growth = epsgrowth_series.iloc[0]
-        
-        # Check if eps_growth is valid (convert from percentage if needed)
-        # EPS growth from API is usually in percentage form (e.g., 15 for 15%)
-        if pd.isna(eps_growth) or eps_growth == 0:
-            print(f"EPS growth không hợp lệ: {eps_growth} cho {symbol}")
-            return {
-                'peg_ratio': None,
-                'pe_ratio': pe,
-                'eps_current': None,
-                'eps_forward': None,
-                'eps_growth': None,
-                'note': 'Invalid EPS growth value'
-            }
-        
-        # Convert EPS growth to percentage form
-        # If eps_growth > 1, assume it's in percentage (e.g., 15 for 15%)
-        # Multiply by 100 so dashboard can display directly without * 100
-        if abs(eps_growth) > 1:
-            eps_growth_pct = eps_growth
-        else:
-            eps_growth_pct = eps_growth * 100
-        
-        print(f"EPS growth: {eps_growth_pct}%")
+        if eps_forward is not None and not pd.isna(eps_forward) and eps_current > 0:
+            eps_growth_pct = ((eps_forward - eps_current) / abs(eps_current)) * 100
+            print(f"EPS growth: {eps_growth_pct:.2f}%")
+            
+            # Check if eps_growth is negative
+            if eps_growth_pct < 0:
+                note = f'EPS growth âm ({eps_growth_pct:.2f}%) - Không có ý nghĩa tính PEG'
+                print(f"{note}")
         
         # Calculate PEG ratio: P/E / EPS Growth Rate (%)
         # PEG = P/E / (EPS Growth %) - only calculate if growth is positive
-        if eps_growth_pct > 0:
+        peg_ratio = None
+        if eps_growth_pct is not None and eps_growth_pct > 0:
             peg_ratio = pe / eps_growth_pct
+            note = 'PEG calculated successfully'
+        elif eps_growth_pct is not None and eps_growth_pct <= 0:
+            # Note already set above
+            pass
         else:
-            peg_ratio = None
+            note = 'Không đủ dữ liệu để tính EPS growth'
         
         return {
             'peg_ratio': peg_ratio,
             'pe_ratio': pe,
-            'eps_current': None,
-            'eps_forward': None,
+            'eps_current': eps_current,
+            'eps_forward': eps_forward,
             'eps_growth': eps_growth_pct,
-            'note': 'PEG calculated successfully' if peg_ratio else 'PEG calculation failed'
+            'note': note
         }
 
     except Exception as e:
