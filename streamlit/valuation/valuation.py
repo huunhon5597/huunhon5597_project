@@ -217,7 +217,7 @@ def ref_pb_pe(symbol, start_date=None, end_date=None):
 def get_peg(symbol):
     """
     Calculate PEG ratio (Price/Earnings to Growth) for a given stock symbol.
-    Uses FiinFundamental API to get EPS and forward EPS for growth calculation.
+    Uses Vietcap API (iq.vietcap.com.vn) to get EPS growth for PEG calculation.
     
     Args:
         symbol (str): Stock symbol
@@ -251,29 +251,39 @@ def get_peg(symbol):
             print(f"Giá trị P/E không hợp lệ cho {symbol}")
             return None
         
-        # Get EPS and forward EPS from FiinFundamental API
-        url = f"https://fiin-fundamental.ssi.com.vn/Snapshot/GetSnapshotNoneBank?OrganCode={symbol}"
+        # Import and get token from vci_token
+        try:
+            from vci_token.token import get_token
+            token = get_token()
+        except Exception as e:
+            print(f"Lỗi khi lấy token: {e}")
+            return {
+                'peg_ratio': None,
+                'pe_ratio': pe,
+                'eps_current': None,
+                'eps_forward': None,
+                'eps_growth': None,
+                'note': f'Lỗi lấy token: {e}'
+            }
+        
+        # Get EPS growth from Vietcap API
+        url = f"https://iq.vietcap.com.vn/api/iq-insight-service/v2/company/{symbol}/financial-data"
         
         headers = {
-            'accept': 'application/json',
-            'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
-            'content-type': 'application/json',
-            'origin': 'https://iboard.ssi.com.vn',
-            'referer': 'https://iboard.ssi.com.vn/',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
-            'x-fiin-key': 'KEY',
-            'x-fiin-seed': 'SEED',
-            'x-fiin-user-id': 'ID',
-            'x-fiin-user-token': '34,22,95,237,126,230,175,226,69,231,148,31,21,154,184,98,89,2,124,83,66,90,71,118,187,69,225,133,105,147,125,14,207,122,125,145,36,117,2,176,137,41,48,41,85,180,251,125,64,63,194,2,16,11,81,40,218,17,80,175,250,50,43,242,209,147,34,59,159,141,250,83,179,6,195,148,115,79,9,205,182,143,122,48,248,207,40,40,73,109,225,243,146,190,200,97,123,231,164,86,186,241,114,247,68,58,6,95,176,71,68,79,244,2,63,198,5,128,12,97,36,24,39,242,157,228,206,19,195,253,60,28,145,126,219,167,146,151,29,114,213,194,105,255,135,42,139,41,119,172,252,192,159,138,217,159,77,40,220,162,58,24,54,71,204,195,130,115,146,204,87,249,18,125,171,199,198,99,9,34,56,108,100,141,61,62,139,27,247,22,129,159,251,64,216,225,209,246,39,116,104,32,83,188,119,161,189,108,139,11,230,198,91,168,189,60,135,140,145,73,157,249,244,197,4,70,216,166,106,14,64,203,230,186,7,175,6,235,85,14,33,199,250,246,57,161,12,215,193,145,43,82,175,179,191,195'
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {token}',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+            'Origin': 'https://trading.vietcap.com.vn',
+            'Referer': 'https://trading.vietcap.com.vn/'
         }
         
         session = _get_session()
         response = session.get(url, headers=headers, timeout=15)
         
-        print(f"FiinFundamental API status: {response.status_code}")
+        print(f"Vietcap API status: {response.status_code}")
         
         if response.status_code != 200:
-            print(f"FiinFundamental API returned status {response.status_code}")
+            print(f"Vietcap API returned status {response.status_code}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
@@ -284,70 +294,119 @@ def get_peg(symbol):
             }
         
         response_data = response.json()
-        print(f"FiinFundamental API response keys: {response_data.keys()}")
         
-        data = pd.DataFrame(response_data['items'])
-        print(f"FiinFundamental items columns: {data.columns.tolist()}")
-        
-        if 'summary' not in data.columns:
-            print(f"No 'summary' column in response for {symbol}")
+        if 'data' not in response_data:
+            print(f"Không tìm thấy dữ liệu cho {symbol}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
                 'eps_current': None,
                 'eps_forward': None,
                 'eps_growth': None,
-                'note': 'No summary data in API response'
+                'note': 'No data in API response'
             }
         
-        data = pd.DataFrame(data['summary'].tolist())
-        print(f"FiinFundamental summary columns: {data.columns.tolist()}")
+        data = pd.DataFrame(response_data['data'])
         
-        eps_current = data['rtd14'].iloc[0] if 'rtd14' in data.columns else None
-        eps_forward = data['rtd53'].iloc[0] if 'rtd53' in data.columns else None
-        
-        print(f"EPS current: {eps_current}, EPS forward: {eps_forward}")
-        
-        if eps_current is None or eps_forward is None:
-            print(f"Không lấy được EPS data cho {symbol}")
+        if data.empty:
+            print(f"Dữ liệu trống cho {symbol}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
                 'eps_current': None,
                 'eps_forward': None,
                 'eps_growth': None,
-                'note': 'EPS data not available'
+                'note': 'Empty data from API'
             }
         
-        # Calculate EPS growth rate: ((Forward EPS - Current EPS) / Current EPS)
-        # Note: Return as decimal (not multiplied by 100), dashboard will display with "%" symbol
-        if eps_current > 0:
-            eps_growth = (eps_forward - eps_current) / eps_current
+        # Set index to string to filter forecast data
+        data.index = data.index.astype(str)
+        data = data[data.index.str.contains('F', na=False)]
+        
+        # Filter by year - current year and next year (or just next year if after October)
+        now = datetime.datetime.now()
+        year = now.year
+        month = now.month
+        years_allowed = [str(year), str(year + 1)] if month < 10 else [str(year + 1)]
+        data = data[data.index.str[:4].isin(years_allowed)]
+        
+        if data.empty:
+            print(f"Không có dữ liệu dự phóng (Forecast) phù hợp cho {symbol}")
+            return {
+                'peg_ratio': None,
+                'pe_ratio': pe,
+                'eps_current': None,
+                'eps_forward': None,
+                'eps_growth': None,
+                'note': 'No forecast data available'
+            }
+        
+        # Check for epsgrowth column
+        if 'epsgrowth' not in data.columns:
+            print(f"Không tìm thấy cột 'epsgrowth' trong dữ liệu cho {symbol}")
+            print(f"Các cột có sẵn: {data.columns.tolist()}")
+            return {
+                'peg_ratio': None,
+                'pe_ratio': pe,
+                'eps_current': None,
+                'eps_forward': None,
+                'eps_growth': None,
+                'note': 'No epsgrowth column in data'
+            }
+        
+        # Get EPS growth value
+        epsgrowth_series = data['epsgrowth'].dropna()
+        if epsgrowth_series.empty:
+            print(f"Không có giá trị epsgrowth hợp lệ cho {symbol}")
+            return {
+                'peg_ratio': None,
+                'pe_ratio': pe,
+                'eps_current': None,
+                'eps_forward': None,
+                'eps_growth': None,
+                'note': 'No valid EPS growth value'
+            }
+        
+        if len(epsgrowth_series) > 1:
+            eps_growth = epsgrowth_series.mean()
         else:
-            print(f"EPS current <= 0 cho {symbol}")
+            eps_growth = epsgrowth_series.iloc[0]
+        
+        # Check if eps_growth is valid (convert from percentage if needed)
+        # EPS growth from API is usually in percentage form (e.g., 15 for 15%)
+        if pd.isna(eps_growth) or eps_growth == 0:
+            print(f"EPS growth không hợp lệ: {eps_growth} cho {symbol}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
-                'eps_current': eps_current,
-                'eps_forward': eps_forward,
+                'eps_current': None,
+                'eps_forward': None,
                 'eps_growth': None,
-                'note': 'Invalid EPS current value'
+                'note': 'Invalid EPS growth value'
             }
+        
+        # Convert EPS growth to decimal if it's in percentage form
+        # If eps_growth > 1, assume it's in percentage (e.g., 15 for 15%)
+        if abs(eps_growth) > 1:
+            eps_growth_decimal = eps_growth / 100
+        else:
+            eps_growth_decimal = eps_growth
+        
+        print(f"EPS growth: {eps_growth} ({eps_growth_decimal * 100}%)")
         
         # Calculate PEG ratio: P/E / EPS Growth Rate (%)
-        # EPS growth is in decimal form, need to multiply by 100 for PEG calculation
         # PEG = P/E / (EPS Growth %)
-        if eps_growth != 0:
-            peg_ratio = pe / abs(eps_growth * 100)
+        if eps_growth_decimal != 0:
+            peg_ratio = pe / abs(eps_growth_decimal * 100)
         else:
             peg_ratio = None
         
         return {
             'peg_ratio': peg_ratio,
             'pe_ratio': pe,
-            'eps_current': eps_current,
-            'eps_forward': eps_forward,
-            'eps_growth': eps_growth,
+            'eps_current': None,
+            'eps_forward': None,
+            'eps_growth': eps_growth_decimal,
             'note': 'PEG calculated successfully' if peg_ratio else 'PEG calculation failed'
         }
 

@@ -2448,7 +2448,7 @@ elif main_menu == "Cổ phiếu":
                                 if eps_current is not None and eps_forward is not None:
                                     data_col3.metric("EPS hiện tại / dự phóng", f"{float(eps_current):.0f} / {float(eps_forward):.0f}")
                                 else:
-                                    data_col3.metric("Nguồn dữ liệu", "FiinFundamental")
+                                    data_col3.metric("Nguồn dữ liệu", "Vietcap")
                                 
                                 # Add explanation
                                 with st.expander("Giải thích PEG"):
