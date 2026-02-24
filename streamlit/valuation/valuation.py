@@ -7,6 +7,7 @@ import concurrent.futures
 import importlib.util
 import datetime
 from datetime import datetime as dt, timedelta
+import yfinance as yf
 
 # Create a global session with connection pooling for better performance
 _session = None
@@ -379,4 +380,112 @@ def get_peg(symbol):
 
     except Exception as e:
         print(f"Có lỗi xảy ra trong hàm get_peg: {e}")
+        return None
+
+
+def fireant_valuation(symbol):
+    """
+    Fetch stock valuation from Fireant API.
+    
+    Args:
+        symbol (str): Stock symbol (e.g., 'SSI', 'VNM', 'FPT')
+    
+    Returns:
+        float: The composed/estimated price from Fireant, or None if failed
+    """
+    url = f"https://restv2.fireant.vn/symbols/{symbol}/estimated-price"
+    
+    headers = {
+        'sec-ch-ua-platform': '"Windows"',
+        'Authorization': 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6IkdYdExONzViZlZQakdvNERWdjV4QkRITHpnSSIsImtpZCI6IkdYdExONzViZlZQakdvNERWdjV4QkRITHpnSSJ9.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmZpcmVhbnQudm4iLCJhdWQiOiJodHRwczovL2FjY291bnRzLmZpcmVhbnQudm4vcmVzb3VyY2VzIiwiZXhwIjoyMDIwNDI4ODMwLCJuYmYiOjE3MjA0Mjg4MzAsImNsaWVudF9pZCI6ImZpcmVhbnQudHJhZGVzdGF0aW9uIiwic2NvcGUiOlsib3BlbmlkIiwicHJvZmlsZSIsInJvbGVzIiwiZW1haWwiLCJhY2NvdW50cy1yZWFkIiwiYWNjb3VudHMtd3JpdGUiLCJvcmRlcnMtcmVhZCIsIm9yZGVycy13cml0ZSIsImNvbXBhbmllcy1yZWFkIiwiaW5kaXZpZHVhbHMtcmVhZCIsImZpbmFuY2UtcmVhZCIsInBvc3RzLXdyaXRlIiwicG9zdHMtcmVhZCIsInN5bWJvbHMtcmVhZCIsInVzZXItZGF0YS1yZWFkIiwidXNlci1kYXRhLXdyaXRlIiwidXNlcnMtcmVhZCIsInNlYXJjaCIsImFjYWRlbXktcmVhZCIsImFjYWRlbXktd3JpdGUiLCJibG9nLXJlYWQiLCJpbnZlc3RvcGVkaWEtcmVhZCJdLCJzdWIiOiIxODAxZWMxMC0xOTlkLTQwZTItYjA2Zi05OTk1N2VjYTBhNTMiLCJhdXRoX3RpbWUiOjE3MjA0Mjg4MjksImlkcCI6Ikdvb2dsZSIsIm5hbWUiOiJodXVuaG9uNTU5N0BnbWFpbC5jb20iLCJzZWN1cml0eV9zdGFtcCI6IjBkMWNiYWM1LTJhY2ItNDM0YS04Y2RiLTkxYjJhMTQ0NDQwOSIsImp0aSI6IjdkZTVjNWFlYmIyMzI1ZTgxOTc1ZGI0ZDZiOGVhODFkIiwiYW1yIjpbImV4dGVybmFsIl19.uo0_GkgcLPW3FcESTrF8y4Frx8Y6qkEGeCkAc_CBLzpfMaMiTjTEL2hqotwaYBpupg8dPGMFo_NF6SMoEkJezMTDIoOdO6JrOxA_ZiKtWo24wOTJ-2lKfJeKV-d7iE5JyioFfhBFGFiDx17TcCqaE7js6boXPrr2h5-HmfaljEHcADSohl-B1ceW6U-yJHLjB-97ZTl4ggG5Cr0lTTj5ipmAwYIW32ZZWt9z1NfHnd4d3ZTyfmXZ2SR3xJmKcaBt9spwtzLGZqo9HRje2reKNK73MWespQL3n7pvufelK2HihYG1MMbIy52Tmc0T0Vrj3Z5xxizWhG6fUzUYud_clQ',
+        'Referer': '',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 OPR/122.0.0.0 (Edition globalgames-sd)',
+        'Accept': 'application/json, text/plain, */*',
+        'sec-ch-ua': '"Not)A;Brand";v="8", "Chromium";v="138", "Opera GX";v="122"',
+        'sec-ch-ua-mobile': '?0'
+    }
+    
+    try:
+        session = _get_session()
+        response = session.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            print(f"Fireant API returned status {response.status_code}")
+            return None
+        
+        data = response.json()
+        composed_price = data.get('composedPrice')
+        
+        return composed_price
+        
+    except Exception as e:
+        print(f"Error fetching Fireant valuation for {symbol}: {e}")
+        return None
+
+
+def analyst_price_targets(symbol):
+    """
+    Fetch analyst price targets for a Vietnamese stock using yfinance.
+    
+    Args:
+        symbol (str): Stock symbol (e.g., 'HPG', 'VNM', 'FPT')
+    
+    Returns:
+        dict: Dictionary containing:
+            - high: Highest price target
+            - low: Lowest price target  
+            - mean: Mean price target
+            - median: Median price target
+            Or None if failed
+    """
+    try:
+        ticker = yf.Ticker(f"{symbol}.VN")
+        price_targets = ticker.analyst_price_targets
+        
+        # Handle case where price_targets is a dict
+        if isinstance(price_targets, dict):
+            if not price_targets:
+                print(f"No analyst price targets available for {symbol}")
+                return None
+            
+            result = {}
+            result['high'] = float(price_targets.get('high', 0)) if price_targets.get('high') is not None else None
+            result['low'] = float(price_targets.get('low', 0)) if price_targets.get('low') is not None else None
+            result['mean'] = float(price_targets.get('mean', 0)) if price_targets.get('mean') is not None else None
+            result['median'] = float(price_targets.get('median', 0)) if price_targets.get('median') is not None else None
+            
+            return result
+        
+        # Handle case where price_targets is a DataFrame
+        if price_targets is None or (hasattr(price_targets, 'empty') and price_targets.empty):
+            print(f"No analyst price targets available for {symbol}")
+            return None
+        
+        # Extract the values from DataFrame
+        result = {}
+        
+        if 'high' in price_targets.columns:
+            result['high'] = float(price_targets['high'].iloc[0]) if not price_targets['high'].empty else None
+        else:
+            result['high'] = None
+            
+        if 'low' in price_targets.columns:
+            result['low'] = float(price_targets['low'].iloc[0]) if not price_targets['low'].empty else None
+        else:
+            result['low'] = None
+            
+        if 'mean' in price_targets.columns:
+            result['mean'] = float(price_targets['mean'].iloc[0]) if not price_targets['mean'].empty else None
+        else:
+            result['mean'] = None
+            
+        if 'median' in price_targets.columns:
+            result['median'] = float(price_targets['median'].iloc[0]) if not price_targets['median'].empty else None
+        else:
+            result['median'] = None
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error fetching analyst price targets for {symbol}: {e}")
         return None

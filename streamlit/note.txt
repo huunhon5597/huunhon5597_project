@@ -1,5 +1,5 @@
 D:
 cd D:\Nhon\Stocks\Project\streamlit
-streamlit run dashboard-test.py
+streamlit run dashboard-streamlit.py
 
 taskkill /f /im streamlit.exe
