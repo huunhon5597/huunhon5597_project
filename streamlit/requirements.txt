@@ -7,3 +7,4 @@ pandas_ta
 arch
 numpy
 lxml
+yfinance
