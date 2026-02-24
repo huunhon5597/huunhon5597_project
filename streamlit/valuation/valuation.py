@@ -385,19 +385,20 @@ def get_peg(symbol):
                 'note': 'Invalid EPS growth value'
             }
         
-        # Convert EPS growth to decimal if it's in percentage form
+        # Convert EPS growth to percentage form
         # If eps_growth > 1, assume it's in percentage (e.g., 15 for 15%)
+        # Multiply by 100 so dashboard can display directly without * 100
         if abs(eps_growth) > 1:
-            eps_growth_decimal = eps_growth / 100
+            eps_growth_pct = eps_growth
         else:
-            eps_growth_decimal = eps_growth
+            eps_growth_pct = eps_growth * 100
         
-        print(f"EPS growth: {eps_growth} ({eps_growth_decimal * 100}%)")
+        print(f"EPS growth: {eps_growth_pct}%")
         
         # Calculate PEG ratio: P/E / EPS Growth Rate (%)
-        # PEG = P/E / (EPS Growth %)
-        if eps_growth_decimal != 0:
-            peg_ratio = pe / abs(eps_growth_decimal * 100)
+        # PEG = P/E / (EPS Growth %) - only calculate if growth is positive
+        if eps_growth_pct > 0:
+            peg_ratio = pe / eps_growth_pct
         else:
             peg_ratio = None
         
@@ -406,7 +407,7 @@ def get_peg(symbol):
             'pe_ratio': pe,
             'eps_current': None,
             'eps_forward': None,
-            'eps_growth': eps_growth_decimal,
+            'eps_growth': eps_growth_pct,
             'note': 'PEG calculated successfully' if peg_ratio else 'PEG calculation failed'
         }
 

@@ -2441,7 +2441,7 @@ elif main_menu == "Cổ phiếu":
                                 
                                 # Display key metrics
                                 data_col1.metric("P/E gần nhất", f"{pe_ratio:.2f}")
-                                data_col2.metric("Tăng trưởng EPS dự báo", f"{eps_growth * 100:.2f}%")
+                                data_col2.metric("Tăng trưởng EPS dự báo", f"{eps_growth:.2f}%")
                                 # Get additional data from peg_data
                                 eps_current = peg_data.get('eps_current')
                                 eps_forward = peg_data.get('eps_forward')
