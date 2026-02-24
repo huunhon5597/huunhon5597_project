@@ -1978,8 +1978,8 @@ elif main_menu == "Cổ phiếu":
         
         # Cached wrapper for ref_pb_pe (shared between P/B and P/E tabs)
         @st.cache_data(ttl=3600)
-        def cached_ref_pb_pe(symbol):
-            return ref_pb_pe(symbol)
+        def cached_ref_pb_pe(symbol, start_date=None, end_date=None):
+            return ref_pb_pe(symbol, start_date=start_date, end_date=end_date)
         
         # Cached wrapper for get_pb_pe historical data
         @st.cache_data(ttl=3600)
@@ -2226,7 +2226,7 @@ elif main_menu == "Cổ phiếu":
                                 # get reference thresholds using ref_pb_pe (shared function)
                                 pb_ref = None
                                 try:
-                                    pb_ref, _ = cached_ref_pb_pe(symbol_pb)
+                                    pb_ref, _ = cached_ref_pb_pe(symbol_pb, start_date=start_date.strftime('%Y-%m-%d'), end_date=end_date.strftime('%Y-%m-%d'))
                                 except Exception as e:
                                     st.warning(f"Không lấy được giá trị tham chiếu từ ref_pb_pe: {e}")
 
@@ -2301,7 +2301,7 @@ elif main_menu == "Cổ phiếu":
                                 # get reference thresholds using ref_pb_pe (shared function)
                                 pe_ref = None
                                 try:
-                                    _, pe_ref = cached_ref_pb_pe(symbol_pe)
+                                    _, pe_ref = cached_ref_pb_pe(symbol_pe, start_date=start_date.strftime('%Y-%m-%d'), end_date=end_date.strftime('%Y-%m-%d'))
                                 except Exception as e:
                                     st.warning(f"Không lấy được giá trị tham chiếu từ ref_pb_pe: {e}")
 

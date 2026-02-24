@@ -129,13 +129,15 @@ def _get_sector_symbols(symbol):
         return []
 
 
-def ref_pb_pe(symbol):
+def ref_pb_pe(symbol, start_date=None, end_date=None):
     """
     Calculate P/B and P/E reference values for a symbol including sector comparison.
     Uses 24hmoney API for sector peers and FiinTrade API for valuation data.
     
     Args:
         symbol (str): Stock symbol
+        start_date (str): Start date in YYYY-MM-DD format (default: 1 year ago)
+        end_date (str): End date in YYYY-MM-DD format (default: today)
         
     Returns:
         tuple: (pb_result, pe_result) where each is a pd.Series with:
@@ -145,7 +147,7 @@ def ref_pb_pe(symbol):
             - sec_med: Sector median
     """
     # Get TTM values for the target symbol
-    df = get_pb_pe(symbol)
+    df = get_pb_pe(symbol, start_date, end_date)
     pb_ttm_avg = df['pb'].mean()
     pb_ttm_med = df['pb'].median()
     pe_ttm_avg = df['pe'].mean()
