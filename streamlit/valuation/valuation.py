@@ -271,10 +271,17 @@ def get_peg(symbol):
         
         headers = {
             'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
             'Authorization': f'Bearer {token}',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+            'Connection': 'keep-alive',
+            'Content-Type': 'application/json',
             'Origin': 'https://trading.vietcap.com.vn',
-            'Referer': 'https://trading.vietcap.com.vn/'
+            'Referer': 'https://trading.vietcap.com.vn/iq/coverage?login-from=individual',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+            'client-id': 'a670914c-8964-4b2c-a289-6de4d5b9d2c4',
+            'client-secret': '42IGbQ9oXZ1p2JK',
+            'device-id': '194d5c0250f11306',
+            'grant-type': 'password',
         }
         
         session = _get_session()
@@ -282,21 +289,22 @@ def get_peg(symbol):
         
         print(f"Vietcap API status: {response.status_code}")
         
-        if response.status_code == 403:
-            import streamlit as st
-            st.error("Bị chặn rồi!")
-            st.write(response.headers)  # Xem server trả về là gì (Cloudflare, Nginx, hay Vietcap)
-            st.code(response.text[:500])  # Xem 500 ký tự đầu của trang lỗi
-        
         if response.status_code != 200:
-            print(f"Vietcap API returned status {response.status_code}")
+            # Store 403 error info for debugging
+            error_info = {
+                'status_code': response.status_code,
+                'headers': dict(response.headers),
+                'text': response.text[:500] if response.text else ''
+            }
+            print(f"Vietcap API error info: {error_info}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
                 'eps_current': None,
                 'eps_forward': None,
                 'eps_growth': None,
-                'note': f'API returned status {response.status_code}'
+                'note': f'API returned status {response.status_code}',
+                'error_info': error_info
             }
         
         response_data = response.json()

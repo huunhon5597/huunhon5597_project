@@ -2359,6 +2359,13 @@ elif main_menu == "Cổ phiếu":
                                             st.warning("Dữ liệu PEG chứa giá trị None. Có thể API không trả về đủ dữ liệu EPS.")
                                             st.info(f"Chi tiết: {peg_data.get('note', 'Không có thông báo')}")
                                             
+                                            # Show debug info for 403 error
+                                            if peg_data.get('error_info'):
+                                                error_info = peg_data['error_info']
+                                                st.error("Bị chặn rồi!")
+                                                st.write("Headers:", error_info.get('headers', {}))  # Xem server trả về là gì
+                                                st.code(error_info.get('text', '')[:500])  # Xem 500 ký tự đầu của trang lỗi
+                                            
                                             # Show debug info
                                             with st.expander("Debug: Xem chi tiết lỗi"):
                                                 st.write("PEG Data trả về:", peg_data)

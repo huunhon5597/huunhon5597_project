@@ -13,16 +13,15 @@ class TokenError(RuntimeError):
 
 def _load_default_config():
     """Load configuration from environment with sensible defaults."""
+    # Try to get from Streamlit secrets first (if available)
+    # Streamlit secrets are automatically available in os.environ when deployed
     return {
         "url": os.environ.get(
             "VCI_TOKEN_URL",
             "https://trading.vietcap.com.vn/api/iam-external-service/v1/authentication/login",
         ),
-        "username": os.environ.get("VCI_USERNAME", "068C405016"),
-        "password": os.environ.get(
-            "VCI_PASSWORD",
-            "a2298c602ad9f0236358e853123c43ebbb90fe2419f3e91dd38e10967dbef8f5ab0b68220166d0ca4ef01dbf85f265305ec9c6c7a54437392de5be69cef01107215e623c68531d7b2e3df97a85a771b36d04cd7fa040547a730005f1f9225a53866ce13c5c8960a12c1fbed6d89cd1d8c2324d0e34ccd2c5d641dad0de422296b6ff674e67a2fadb6362e3aad37d59c8aefaaf04789d15aaccd0ce79d79b2b064603e6de681f1ba3de0cf18febd9cb24ce51f403e6866c8116debfcf503e6fa9cd487f3408db2c6a05b15cd1511ee3261653d54a5921c05dc1e2fecded9b44b7523b8040c502f051a72b6b6ed51676f99cada5d7d7b451e874b633d32a7022ae",
-        ),
+        "username": os.environ.get("VCI_USERNAME", ""),
+        "password": os.environ.get("VCI_PASSWORD", ""),
     }
 
 
@@ -70,6 +69,12 @@ def get_token(force_refresh: bool = False, cache_ttl: int = 50) -> str:
 
     cfg = _load_default_config()
     url = cfg["url"]
+    
+    # Validate credentials are set
+    if not cfg["username"] or not cfg["password"]:
+        raise TokenError("VCI_USERNAME and VCI_PASSWORD environment variables are not set. "
+                        "Please configure them in Streamlit Cloud secrets or .env file.")
+    
     payload_dict = {"username": cfg["username"], "password": cfg["password"]}
     headers = _default_headers()
 
