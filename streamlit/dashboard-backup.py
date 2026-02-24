@@ -1917,7 +1917,8 @@ elif main_menu == "Cổ phiếu":
     
     elif co_phieu_submenu == "Định giá":
         # Import valuation-related modules only when this menu is selected
-        from valuation.valuation import get_pb_pe, ref_pb_pe, get_peg
+        from valuation.valuation import get_pb_pe, ref_pb_pe, get_peg, fireant_valuation, analyst_price_targets
+        from stock_data.stock_data import get_stock_history
         
         st.header("📊 Định giá")
         
@@ -1967,8 +1968,8 @@ elif main_menu == "Cổ phiếu":
         </style>
         """, unsafe_allow_html=True)
         
-        # Create tabs for P/B, P/E, PEG, Features
-        tab_pb, tab_pe, tab_peg, tab_features = st.tabs(["📊 P/B", "📈 P/E", "🎯 PEG", "⚡ Features"])
+        # Create tabs for P/B, P/E, PEG, Price, Features
+        tab_pb, tab_pe, tab_peg, tab_price, tab_features = st.tabs(["📊 P/B", "📈 P/E", "🎯 PEG", "💰 Price", "⚡ Features"])
         
         # Initialize session state for storing charts
         if 'pb_chart_data' not in st.session_state:
@@ -1988,9 +1989,15 @@ elif main_menu == "Cổ phiếu":
 
         # Function to display P/B chart from stored data
         def display_pb_chart(pb_df, pb_ref, symbol):
+            # Create chart with dark theme
             fig_pb = go.Figure()
+            
+            # Add P/B line with area fill
             fig_pb.add_trace(go.Scatter(
-                x=pb_df['date'], y=pb_df['pb'], mode='lines+markers', name='P/B', line=dict(color='#1f77b4')
+                x=pb_df['date'], y=pb_df['pb'], mode='lines', name='P/B',
+                line=dict(color='#00BFFF', width=2.5),
+                fill='tozeroy',
+                fillcolor='rgba(0, 191, 255, 0.1)',
             ))
 
             # Normalize ref to a dict for easy access
@@ -2012,24 +2019,25 @@ elif main_menu == "Cổ phiếu":
                     ('pb_sec_avg', 'PB Sec Avg'),
                     ('pb_sec_med', 'PB Sec Med'),
                 ]
+                # Get current/last P/B value
+                pb_latest = pb_df['pb'].dropna().iloc[-1] if not pb_df['pb'].dropna().empty else None
+                
                 for i, (k, label) in enumerate(keys_map):
                     val = thresholds.get(k)
                     if val is not None and not pd.isna(val):
                         try:
-                            cols[i].metric(label, f"{float(val):.2f}")
+                            # Add delta for PB TTM Avg
+                            if k == 'pb_ttm_avg' and pb_latest is not None:
+                                pb_diff = ((val - pb_latest) / pb_latest) * 100 if pb_latest != 0 else 0
+                                cols[i].metric(label, f"{float(val):.2f}", delta=f"{pb_diff:+.1f}%", delta_color="normal")
+                            else:
+                                cols[i].metric(label, f"{float(val):.2f}")
                         except Exception:
                             cols[i].metric(label, str(val))
 
-                # draw horizontal lines for numeric thresholds and add annotations placed on the chart (not outside)
-                colors = ['#ff7f0e', '#d62728', '#2ca02c', '#9467bd']
-                ann_idx = 0
-                # Use the last available x (date) as base for annotations so they sit on-chart near the right edge.
-                last_x = pd.Timestamp(pb_df['date'].max())
-                # We'll place annotations above the plot area using paper coordinates (yref='paper').
-                # Stack them vertically so they do not overlap and do not cover series.
-                ann_y_start = 1.02
-                ann_y_step = 0.06
-                ann_x_paper = 0.98
+                # Add threshold lines as traces (show in legend)
+                colors = ['#FF8C00', '#DC143C', '#32CD32', '#9370DB']
+                
                 for i, (k, label) in enumerate(keys_map):
                     val = thresholds.get(k)
                     if val is None:
@@ -2038,37 +2046,87 @@ elif main_menu == "Cổ phiếu":
                         yv = float(val)
                     except Exception:
                         continue
-                    # add horizontal line (spans full x range)
-                    try:
-                        fig_pb.add_hline(y=yv, line_dash='dash', line_color=colors[i % len(colors)], layer='below')
-                    except Exception:
-                        fig_pb.add_shape(type='line', x0=pd.Timestamp(pb_df['date'].min()), x1=pd.Timestamp(pb_df['date'].max()), y0=yv, y1=yv, line=dict(color=colors[i % len(colors)], dash='dash'))
+                    
+                    # Add horizontal line as trace (appears in legend)
+                    fig_pb.add_trace(go.Scatter(
+                        x=[pd.Timestamp(pb_df['date'].min()), pd.Timestamp(pb_df['date'].max())],
+                        y=[yv, yv],
+                        mode='lines',
+                        name=f"{label}: {yv:.2f}",
+                        line=dict(color=colors[i % len(colors)], width=2, dash='dash'),
+                        showlegend=True,
+                        hoverinfo='skip'
+                    ))
 
-                    # place annotation above the chart using paper coordinates so it doesn't cover data
-                    ann_y = ann_y_start + (ann_idx * ann_y_step)
-                    try:
-                        fig_pb.add_annotation(
-                            x=ann_x_paper,
-                            xref='paper',
-                            xanchor='right',
-                            y=ann_y,
-                            yref='paper',
-                            text=f"{label}: {yv:.2f}",
-                            showarrow=False,
-                            bgcolor=colors[i % len(colors)],
-                            bordercolor='rgba(0,0,0,0.1)',
-                            font={'color': 'white', 'size': 11},
-                            opacity=0.95
-                        )
-                        ann_idx += 1
-                    except Exception:
-                        pass
-
-                # increase top margin to make room for annotations above the plot
-                fig_pb.update_layout(margin=dict(r=120, t=120))
-
-            fig_pb.update_layout(title=f"P/B historical for {symbol}", xaxis_title='Date', yaxis_title='P/B', height=520, hovermode='x unified')
-            st.plotly_chart(fig_pb, width='stretch')
+                # Update layout with dark theme and annotations
+                fig_pb.update_layout(
+                    title=dict(
+                        text=f"<b>📊 P/B Ratio {symbol}</b>",
+                        x=0.5, xanchor='center',
+                        font=dict(size=18, color='white'),
+                        y=0.95
+                    ),
+                    xaxis_title=dict(text='<b>Date</b>', font=dict(color='white')),
+                    yaxis_title=dict(text='<b>P/B</b>', font=dict(color='white')),
+                    height=520,
+                    hovermode='x unified',
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h", yanchor="bottom", y=1.05,
+                        xanchor="center", x=0.5,
+                        font=dict(color='white', size=11),
+                        bgcolor='rgba(0,0,0,0.3)'
+                    ),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(30,30,30,0.5)',
+                    margin=dict(t=120, l=60, r=40, b=60),
+                    xaxis=dict(
+                        showgrid=True, gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white'),
+                        title_font=dict(color='white')
+                    ),
+                    yaxis=dict(
+                        showgrid=True, gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white'),
+                        title_font=dict(color='white')
+                    )
+                )
+            else:
+                # Basic layout without thresholds
+                fig_pb.update_layout(
+                    title=dict(
+                        text=f"<b>📊 P/B Ratio {symbol}</b>",
+                        x=0.5, xanchor='center',
+                        font=dict(size=18, color='white'),
+                        y=0.95
+                    ),
+                    xaxis_title=dict(text='<b>Date</b>', font=dict(color='white')),
+                    yaxis_title=dict(text='<b>P/B</b>', font=dict(color='white')),
+                    height=520,
+                    hovermode='x unified',
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h", yanchor="bottom", y=1.05,
+                        xanchor="center", x=0.5,
+                        font=dict(color='white', size=11),
+                        bgcolor='rgba(0,0,0,0.3)'
+                    ),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(30,30,30,0.5)',
+                    margin=dict(t=80, l=60, r=40, b=60),
+                    xaxis=dict(
+                        showgrid=True, gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white'),
+                        title_font=dict(color='white')
+                    ),
+                    yaxis=dict(
+                        showgrid=True, gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white'),
+                        title_font=dict(color='white')
+                    ),
+                )
+            
+            st.plotly_chart(fig_pb, use_container_width=True)
 
             with st.expander("Xem dữ liệu P/B chi tiết"):
                 st.dataframe(pb_df.rename(columns={'date': 'time'}), width='stretch')
@@ -2076,15 +2134,21 @@ elif main_menu == "Cổ phiếu":
 
         # Function to display P/E chart from stored data
         def display_pe_chart(pe_df, pe_ref, symbol):
+            # Create chart with dark theme
             fig_pe = go.Figure()
-            # choose pe column candidate
+            
+            # Choose pe column candidate
             pe_col = next((c for c in ['pe', 'pe_ttm', 'pe_latest'] if c in pe_df.columns), None)
             if pe_col is None:
                 st.error("Không tìm thấy cột P/E trong dữ liệu trả về.")
                 return
-                
+            
+            # Add P/E line with area fill
             fig_pe.add_trace(go.Scatter(
-                x=pe_df['date'], y=pe_df[pe_col], mode='lines+markers', name='P/E', line=dict(color='#2ca02c')
+                x=pe_df['date'], y=pe_df[pe_col], mode='lines', name='P/E',
+                line=dict(color='#32CD32', width=2.5),
+                fill='tozeroy',
+                fillcolor='rgba(50, 205, 50, 0.1)',
             ))
 
             # Normalize ref to a dict for easy access
@@ -2106,20 +2170,25 @@ elif main_menu == "Cổ phiếu":
                     ('pe_sec_avg', 'PE Sec Avg'),
                     ('pe_sec_med', 'PE Sec Med'),
                 ]
+                # Get current/last P/E value
+                pe_latest = pe_df[pe_col].dropna().iloc[-1] if pe_col and not pe_df[pe_col].dropna().empty else None
+                
                 for i, (k, label) in enumerate(keys_map):
                     val = thresholds.get(k)
                     if val is not None and not pd.isna(val):
                         try:
-                            cols[i].metric(label, f"{float(val):.2f}")
+                            # Add delta for PE TTM Avg
+                            if k == 'pe_ttm_avg' and pe_latest is not None:
+                                pe_diff = ((val - pe_latest) / pe_latest) * 100 if pe_latest != 0 else 0
+                                cols[i].metric(label, f"{float(val):.2f}", delta=f"{pe_diff:+.1f}%", delta_color="normal")
+                            else:
+                                cols[i].metric(label, f"{float(val):.2f}")
                         except Exception:
                             cols[i].metric(label, str(val))
 
-                # draw horizontal lines for numeric thresholds and add annotations above the chart
-                colors = ['#ff7f0e', '#d62728', '#1f77b4', '#9467bd']
-                ann_idx = 0
-                ann_y_start = 1.02
-                ann_y_step = 0.06
-                ann_x_paper = 0.98
+                # Add threshold lines as traces (show in legend)
+                colors = ['#FF8C00', '#DC143C', '#1E90FF', '#9370DB']
+                
                 for i, (k, label) in enumerate(keys_map):
                     val = thresholds.get(k)
                     if val is None:
@@ -2128,40 +2197,90 @@ elif main_menu == "Cổ phiếu":
                         yv = float(val)
                     except Exception:
                         continue
-                    # add horizontal line (spans full x range)
-                    try:
-                        fig_pe.add_hline(y=yv, line_dash='dash', line_color=colors[i % len(colors)], layer='below')
-                    except Exception:
-                        fig_pe.add_shape(type='line', x0=pe_df['date'].min(), x1=pe_df['date'].max(), y0=yv, y1=yv, line=dict(color=colors[i % len(colors)], dash='dash'))
+                    
+                    # Add horizontal line as trace (appears in legend)
+                    fig_pe.add_trace(go.Scatter(
+                        x=[pe_df['date'].min(), pe_df['date'].max()],
+                        y=[yv, yv],
+                        mode='lines',
+                        name=f"{label}: {yv:.2f}",
+                        line=dict(color=colors[i % len(colors)], width=2, dash='dash'),
+                        showlegend=True,
+                        hoverinfo='skip'
+                    ))
 
-                    # place annotation above the chart using paper coordinates so it doesn't cover data
-                    ann_y = ann_y_start + (ann_idx * ann_y_step)
-                    try:
-                        fig_pe.add_annotation(
-                            x=ann_x_paper,
-                            xref='paper',
-                            xanchor='right',
-                            y=ann_y,
-                            yref='paper',
-                            text=f"{label}: {yv:.2f}",
-                            showarrow=False,
-                            bgcolor=colors[i % len(colors)],
-                            bordercolor='rgba(0,0,0,0.1)',
-                            font={'color': 'white', 'size': 11},
-                            opacity=0.95
-                        )
-                        ann_idx += 1
-                    except Exception:
-                        pass
-
-                # increase top margin for annotations
-                fig_pe.update_layout(margin=dict(r=120, t=120))
-
-            fig_pe.update_layout(title=f"P/E historical for {symbol}", xaxis_title='Date', yaxis_title='P/E', height=520, hovermode='x unified')
-            st.plotly_chart(fig_pe, width='stretch')
+                # Update layout with dark theme
+                fig_pe.update_layout(
+                    title=dict(
+                        text=f"<b>📈 P/E Ratio {symbol}</b>",
+                        x=0.5, xanchor='center',
+                        font=dict(size=18, color='white'),
+                        y=0.95
+                    ),
+                    xaxis_title=dict(text='<b>Date</b>', font=dict(color='white')),
+                    yaxis_title=dict(text='<b>P/E</b>', font=dict(color='white')),
+                    height=520,
+                    hovermode='x unified',
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h", yanchor="bottom", y=1.05,
+                        xanchor="center", x=0.5,
+                        font=dict(color='white', size=11),
+                        bgcolor='rgba(0,0,0,0.3)'
+                    ),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(30,30,30,0.5)',
+                    margin=dict(t=120, l=60, r=40, b=60),
+                    xaxis=dict(
+                        showgrid=True, gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white'),
+                        title_font=dict(color='white')
+                    ),
+                    yaxis=dict(
+                        showgrid=True, gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white'),
+                        title_font=dict(color='white')
+                    )
+                )
+            else:
+                # Basic layout without thresholds
+                fig_pe.update_layout(
+                    title=dict(
+                        text=f"<b>📈 P/E Ratio {symbol}</b>",
+                        x=0.5, xanchor='center',
+                        font=dict(size=18, color='white'),
+                        y=0.95
+                    ),
+                    xaxis_title=dict(text='<b>Date</b>', font=dict(color='white')),
+                    yaxis_title=dict(text='<b>P/E</b>', font=dict(color='white')),
+                    height=520,
+                    hovermode='x unified',
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h", yanchor="bottom", y=1.05,
+                        xanchor="center", x=0.5,
+                        font=dict(color='white', size=11),
+                        bgcolor='rgba(0,0,0,0.3)'
+                    ),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(30,30,30,0.5)',
+                    margin=dict(t=80, l=60, r=40, b=60),
+                    xaxis=dict(
+                        showgrid=True, gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white'),
+                        title_font=dict(color='white')
+                    ),
+                    yaxis=dict(
+                        showgrid=True, gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white'),
+                        title_font=dict(color='white')
+                    ),
+                )
+            
+            st.plotly_chart(fig_pe, use_container_width=True)
 
             with st.expander("Xem dữ liệu P/E chi tiết"):
-                st.dataframe(pe_df.rename(columns={'date': 'time'}), width='stretch')
+                st.dataframe(pe_df.rename(columns={'date': 'time'}), use_container_width=True)
                 st.download_button("Tải xuống P/E CSV", pe_df.to_csv(index=False), f"pe_{symbol}.csv", "text/csv")
 
         # Valuation -> P/B implementation
@@ -2487,6 +2606,386 @@ elif main_menu == "Cổ phiếu":
                             except Exception as detailed_e:
                                 st.markdown(f"*Lỗi chi tiết từ hàm get_peg: {type(detailed_e).__name__}: {str(detailed_e)}*")
 
+        # Valuation -> Price implementation (show stock price with Fireant valuation)
+        with tab_price:
+            st.subheader("💰 Giá cổ phiếu và Định giá Fireant")
+            
+            # Create columns for symbol input and period selection
+            price_col1, price_col2 = st.columns([1, 1])
+            with price_col1:
+                symbol_price = st.text_input("Mã cổ phiếu (ví dụ: SSI, VNM, FPT)", value="", max_chars=10, key="val_symbol_price")
+            with price_col2:
+                price_period = st.selectbox(
+                    "Chọn khoảng thời gian",
+                    ["1 tháng", "3 tháng", "6 tháng", "1 năm", "2 năm", "Tùy chỉnh"],
+                    index=3,  # Default to "1 năm"
+                    key="price_period"
+                )
+            
+            # If custom period is selected, show date inputs
+            if price_period == "Tùy chỉnh":
+                price_date_col1, price_date_col2 = st.columns(2)
+                with price_date_col1:
+                    price_start_date = st.date_input(
+                        "Ngày bắt đầu",
+                        value=datetime.now().date() - timedelta(days=365),
+                        key="price_start"
+                    )
+                with price_date_col2:
+                    price_end_date = st.date_input(
+                        "Ngày kết thúc",
+                        value=datetime.now().date(),
+                        key="price_end"
+                    )
+            
+            if st.button("Tải dữ liệu Giá", key="load_price"):
+                if not symbol_price:
+                    st.warning("Vui lòng nhập mã cổ phiếu.")
+                else:
+                    with st.spinner(f"Đang tải dữ liệu giá cho {symbol_price}..."):
+                        try:
+                            # Get date range based on selected period
+                            if price_period == "Tùy chỉnh":
+                                start_date = price_start_date
+                                end_date = price_end_date
+                            else:
+                                start_date, end_date = get_date_range(price_period)
+                            
+                            # Get stock history data
+                            price_df = get_stock_history(symbol_price, period="day", end_date=end_date.strftime('%Y-%m-%d'), count_back=365)
+                            
+                            if price_df is None or price_df.empty:
+                                st.warning("Không có dữ liệu giá trả về cho cổ phiếu này.")
+                            else:
+                                # Filter by date range
+                                price_df['time'] = pd.to_datetime(price_df['time'])
+                                price_df = price_df[(price_df['time'] >= pd.to_datetime(start_date)) & (price_df['time'] <= pd.to_datetime(end_date))]
+                                price_df = price_df.sort_values('time')
+                                
+                                if price_df.empty:
+                                    st.warning("Không có dữ liệu trong khoảng thời gian đã chọn.")
+                                else:
+                                    # Get Fireant valuation
+                                    fireant_val = fireant_valuation(symbol_price)
+                                    
+                                    # Get analyst price targets
+                                    analyst_targets = analyst_price_targets(symbol_price)
+                                    
+                                    # Create the chart with dark theme
+                                    fig_price = go.Figure()
+                                    
+                                    # Add shaded background between high and low (analyst targets)
+                                    if analyst_targets is not None and analyst_targets.get('high') is not None and analyst_targets.get('low') is not None:
+                                        # Add gradient-like effect with multiple rects
+                                        fig_price.add_shape(
+                                            type="rect",
+                                            xref="x", yref="y",
+                                            x0=price_df['time'].min(),
+                                            x1=price_df['time'].max(),
+                                            y0=analyst_targets['low'],
+                                            y1=analyst_targets['high'],
+                                            fillcolor="rgba(0, 200, 100, 0.15)",
+                                            layer="below",
+                                            line_width=0,
+                                        )
+                                        # Add border lines for high and low
+                                        fig_price.add_shape(
+                                            type="line",
+                                            xref="x", yref="y",
+                                            x0=price_df['time'].min(),
+                                            x1=price_df['time'].max(),
+                                            y0=analyst_targets['high'],
+                                            y1=analyst_targets['high'],
+                                            line=dict(color="rgba(0, 200, 100, 0.6)", width=1, dash="solid"),
+                                        )
+                                        fig_price.add_shape(
+                                            type="line",
+                                            xref="x", yref="y",
+                                            x0=price_df['time'].min(),
+                                            x1=price_df['time'].max(),
+                                            y0=analyst_targets['low'],
+                                            y1=analyst_targets['low'],
+                                            line=dict(color="rgba(0, 200, 100, 0.6)", width=1, dash="solid"),
+                                        )
+                                    
+                                    # Add close price line with area fill
+                                    fig_price.add_trace(go.Scatter(
+                                        x=price_df['time'], 
+                                        y=price_df['close'], 
+                                        mode='lines', 
+                                        name='Giá đóng cửa',
+                                        line=dict(color='#00BFFF', width=2.5),
+                                        fill='tozeroy',
+                                        fillcolor='rgba(0, 191, 255, 0.1)',
+                                    ))
+                                    
+                                    # Add mean line (analyst price target)
+                                    if analyst_targets is not None and analyst_targets.get('mean') is not None:
+                                        fig_price.add_trace(go.Scatter(
+                                            x=[price_df['time'].min(), price_df['time'].max()],
+                                            y=[analyst_targets['mean'], analyst_targets['mean']],
+                                            mode='lines',
+                                            name='Mean (PT)',
+                                            line=dict(color='#FF8C00', width=2, dash='dot'),
+                                        ))
+                                    
+                                    # Add median line (analyst price target)
+                                    if analyst_targets is not None and analyst_targets.get('median') is not None:
+                                        fig_price.add_trace(go.Scatter(
+                                            x=[price_df['time'].min(), price_df['time'].max()],
+                                            y=[analyst_targets['median'], analyst_targets['median']],
+                                            mode='lines',
+                                            name='Median (PT)',
+                                            line=dict(color='#9370DB', width=2, dash='dot'),
+                                        ))
+                                    
+                                    # Add Fireant valuation line
+                                    if fireant_val is not None:
+                                        fig_price.add_trace(go.Scatter(
+                                            x=[price_df['time'].min(), price_df['time'].max()],
+                                            y=[fireant_val, fireant_val],
+                                            mode='lines',
+                                            name='Fireant Valuation',
+                                            line=dict(color='#FF4444', width=2.5, dash='dash'),
+                                        ))
+                                    
+                                    # Build annotations list
+                                    annotations = []
+                                    
+                                    # Add annotations for analyst targets
+                                    if analyst_targets is not None:
+                                        if analyst_targets.get('high') is not None:
+                                            annotations.append(dict(
+                                                x=0.02, y=analyst_targets['high'],
+                                                xref='paper', yref='y',
+                                                text=f"High: {analyst_targets['high']:,.0f}",
+                                                showarrow=False,
+                                                xanchor='left',
+                                                font=dict(color='rgba(0, 200, 100, 0.8)', size=10),
+                                                bgcolor='rgba(0, 0, 0, 0.5)',
+                                                borderpad=3
+                                            ))
+                                        if analyst_targets.get('low') is not None:
+                                            annotations.append(dict(
+                                                x=0.02, y=analyst_targets['low'],
+                                                xref='paper', yref='y',
+                                                text=f"Low: {analyst_targets['low']:,.0f}",
+                                                showarrow=False,
+                                                xanchor='left',
+                                                font=dict(color='rgba(0, 200, 100, 0.8)', size=10),
+                                                bgcolor='rgba(0, 0, 0, 0.5)',
+                                                borderpad=3
+                                            ))
+                                        if analyst_targets.get('mean') is not None:
+                                            annotations.append(dict(
+                                                x=0.98, y=analyst_targets['mean'],
+                                                xref='paper', yref='y',
+                                                text=f"Mean: {analyst_targets['mean']:,.0f}",
+                                                showarrow=False,
+                                                xanchor='right',
+                                                font=dict(color='#FF8C00', size=10, family="Arial Black"),
+                                                bgcolor='rgba(0, 0, 0, 0.6)',
+                                                borderpad=3
+                                            ))
+                                        if analyst_targets.get('median') is not None:
+                                            annotations.append(dict(
+                                                x=0.98, y=analyst_targets['median'],
+                                                xref='paper', yref='y',
+                                                text=f"Median: {analyst_targets['median']:,.0f}",
+                                                showarrow=False,
+                                                xanchor='right',
+                                                font=dict(color='#9370DB', size=10, family="Arial Black"),
+                                                bgcolor='rgba(0, 0, 0, 0.6)',
+                                                borderpad=3,
+                                                yshift=20
+                                            ))
+                                    
+                                    # Add Fireant annotation
+                                    if fireant_val is not None:
+                                        annotations.append(dict(
+                                            x=0.5, y=fireant_val,
+                                            xref='paper', yref='y',
+                                            text=f"🔥 Fireant: {fireant_val:,.0f}",
+                                            showarrow=True,
+                                            arrowhead=2,
+                                            arrowcolor='#FF4444',
+                                            xanchor='center',
+                                            yanchor='bottom',
+                                            font=dict(color='#FF4444', size=11, family="Arial Black"),
+                                            bgcolor='rgba(0, 0, 0, 0.7)',
+                                            borderpad=4
+                                        ))
+                                    
+                                    # Display metrics with better layout
+                                    latest_price = price_df['close'].iloc[-1]
+                                    
+                                    if analyst_targets is not None:
+                                        # Calculate upside/downside
+                                        mean_pt = analyst_targets.get('mean')
+                                        median_pt = analyst_targets.get('median')
+                                        
+                                        # Main metrics row
+                                        st.markdown("**💰 Tổng quan Giá**")
+                                        metric_row1 = st.columns([1.8, 1.5, 1.5, 1.8, 1.5])
+                                        
+                                        # Current Price
+                                        metric_row1[0].metric(
+                                            "Giá hiện tại", 
+                                            f"{latest_price:,.0f}"
+                                        )
+                                        
+                                        # Mean PT
+                                        if mean_pt is not None:
+                                            mean_diff = ((mean_pt - latest_price) / latest_price) * 100
+                                            metric_row1[1].metric(
+                                                "Mean (PT)", 
+                                                f"{mean_pt:,.0f}",
+                                                delta=f"{mean_diff:+.1f}%",
+                                                delta_color="normal"
+                                            )
+                                        else:
+                                            metric_row1[1].metric("Mean (PT)", "N/A")
+                                        
+                                        # Median PT
+                                        if median_pt is not None:
+                                            median_diff = ((median_pt - latest_price) / latest_price) * 100
+                                            metric_row1[2].metric(
+                                                "Median (PT)", 
+                                                f"{median_pt:,.0f}",
+                                                delta=f"{median_diff:+.1f}%",
+                                                delta_color="normal"
+                                            )
+                                        else:
+                                            metric_row1[2].metric("Median (PT)", "N/A")
+                                        
+                                        # PT Range
+                                        if analyst_targets.get('high') is not None and analyst_targets.get('low') is not None:
+                                            metric_row1[3].metric(
+                                                "PT Range", 
+                                                f"{analyst_targets['low']:,.0f} - {analyst_targets['high']:,.0f}"
+                                            )
+                                        else:
+                                            metric_row1[3].metric("PT Range", "N/A")
+                                        
+                                        # Fireant
+                                        if fireant_val is not None:
+                                            fireant_diff = ((fireant_val - latest_price) / latest_price) * 100
+                                            metric_row1[4].metric(
+                                                "Fireant", 
+                                                f"{fireant_val:,.0f}",
+                                                delta=f"{fireant_diff:+.1f}%",
+                                                delta_color="normal"
+                                            )
+                                        else:
+                                            metric_row1[4].metric("Fireant", "N/A")
+                                    else:
+                                        price_col1, price_col2, price_col3 = st.columns(3)
+                                        price_col1.metric("Giá đóng cửa mới nhất", f"{latest_price:.2f}")
+                                        if fireant_val is not None:
+                                            price_col2.metric("Định giá Fireant", f"{fireant_val:.2f}")
+                                            diff = latest_price - fireant_val
+                                            diff_pct = (diff / fireant_val) * 100 if fireant_val != 0 else 0
+                                            price_col3.metric("Chênh lệch", f"{diff:.2f} ({diff_pct:.1f}%)", 
+                                                             delta_color="inverse" if diff >= 0 else "normal")
+                                        else:
+                                            price_col2.metric("Định giá Fireant", "N/A")
+                                            price_col3.metric("Chênh lệch", "N/A")
+                                    
+                                    # Update chart layout with dark theme
+                                    fig_price.update_layout(
+                                        title=dict(
+                                            text=f"<b>📈 Biểu đồ giá cổ phiếu {symbol_price}</b> <span style='font-size:12px'>({start_date} - {end_date})</span>",
+                                            x=0.5,
+                                            xanchor='center',
+                                            font=dict(size=18, color='white')
+                                        ),
+                                        xaxis_title=dict(text='<b>Ngày</b>', font=dict(color='white')),
+                                        yaxis_title=dict(text='<b>Giá (VND)</b>', font=dict(color='white')),
+                                        height=550,
+                                        hovermode='x unified',
+                                        showlegend=True,
+                                        legend=dict(
+                                            orientation="h", 
+                                            yanchor="bottom", 
+                                            y=1.08, 
+                                            xanchor="center", 
+                                            x=0.5,
+                                            font=dict(color='white', size=11),
+                                            bgcolor='rgba(0,0,0,0.3)'
+                                        ),
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(30,30,30,0.5)',
+                                        margin=dict(t=120, l=60, r=40, b=60),
+                                        xaxis=dict(
+                                            showgrid=True,
+                                            gridcolor='rgba(255,255,255,0.1)',
+                                            tickfont=dict(color='white'),
+                                            title_font=dict(color='white')
+                                        ),
+                                        yaxis=dict(
+                                            showgrid=True,
+                                            gridcolor='rgba(255,255,255,0.1)',
+                                            tickfont=dict(color='white'),
+                                            title_font=dict(color='white')
+                                        ),
+                                        annotations=annotations
+                                    )
+                                    st.plotly_chart(fig_price, use_container_width=True)
+                                    
+                                    # Check if analyst targets has valid data
+                                    has_analyst_data = analyst_targets is not None and (
+                                        analyst_targets.get('high') is not None or 
+                                        analyst_targets.get('low') is not None or 
+                                        analyst_targets.get('mean') is not None or 
+                                        analyst_targets.get('median') is not None
+                                    )
+                                    
+                                    # Show detailed summary
+                                    st.markdown("---")
+                                    summary_col1, summary_col2 = st.columns(2)
+                                    
+                                    with summary_col1:
+                                        if has_analyst_data:
+                                            st.markdown("### 📊 Analyst Price Targets")
+                                            pt_data = []
+                                            if analyst_targets.get('low'):
+                                                pt_data.append(f"**Low:** {analyst_targets['low']:,.0f} VND")
+                                            if analyst_targets.get('high'):
+                                                pt_data.append(f"**High:** {analyst_targets['high']:,.0f} VND")
+                                            if analyst_targets.get('mean'):
+                                                pt_data.append(f"**Mean:** {analyst_targets['mean']:,.0f} VND")
+                                            if analyst_targets.get('median'):
+                                                pt_data.append(f"**Median:** {analyst_targets['median']:,.0f} VND")
+                                            for item in pt_data:
+                                                st.markdown(f"• {item}")
+                                        else:
+                                            st.markdown("### 📊 Analyst Price Targets")
+                                            st.info("ℹ️ Không có dữ liệu Analyst Price Targets cho mã cổ phiếu này.")
+                                            st.caption("Các nhà phân tích chưa đưa ra mục tiêu giá cho cổ phiếu này.")
+                                    
+                                    with summary_col2:
+                                        if fireant_val is not None:
+                                            st.markdown("### 🔥 Fireant Valuation")
+                                            st.markdown(f"**Giá trị:** {fireant_val:,.0f} VND")
+                                            if latest_price and fireant_val:
+                                                diff_val = fireant_val - latest_price
+                                                diff_pct = (diff_val / latest_price) * 100
+                                                st.markdown(f"**Chênh lệch:** {diff_val:+,.0f} VND ({diff_pct:+.1f}%)")
+                                                if diff_val > 0:
+                                                    st.success("⬆️ Fireant định giá cao hơn giá thị trường")
+                                                else:
+                                                    st.warning("⬇️ Fireant định giá thấp hơn giá thị trường")
+                                        else:
+                                            st.markdown("### 🔥 Fireant Valuation")
+                                            st.info("ℹ️ Không có thông tin định giá từ Fireant")
+                                            st.caption("Hiện tại FireAnt chỉ cung cấp thông tin định giá các cổ phiếu của doanh nghiệp thông thường (không phải ngân hàng, công ty chứng khoán, quỹ).")
+                                    
+                                    with st.expander("📋 Xem dữ liệu giá chi tiết"):
+                                        st.dataframe(price_df, use_container_width=True)
+                                        st.download_button("💾 Tải xuống CSV", price_df.to_csv(index=False), f"price_{symbol_price}.csv", "text/csv")
+                        except Exception as e:
+                            st.error(f"Lỗi khi tải dữ liệu giá: {e}")
+
         # Features section for Định giá menu
         with tab_features:
             st.subheader("🚀 Tính năng Định giá Nổi bật")
@@ -2500,37 +2999,52 @@ elif main_menu == "Cổ phiếu":
                 **P/B Ratio (Price-to-Book)**
                 - So sánh giá thị trường với giá trị sổ sách kế toán
                 - Đánh giá giá trị nội tại của công ty
-                - So sánh với mức trung bình ngành
+                - So sánh với mức trung bình ngành (Sector Average)
+                - Hiển thị delta (% thay đổi so với ngưỡng)
+                - Đường ngưỡng trong legend với giá trị cụ thể
                 
                 **P/E Ratio (Price-to-Earnings)**
                 - Đánh giá giá trị dựa trên khả năng sinh lời
-                - So sánh với mức trung bình thị trường
+                - So sánh với mức trung bình thị trường và ngành
                 - Phân tích xu hướng P/E theo thời gian
+                - Hiển thị delta (% thay đổi so với ngưỡng)
                 
                 **PEG Ratio (Price/Earnings to Growth)**
                 - Kết hợp tốc độ tăng trưởng để đánh giá giá trị
                 - PEG = P/E / Tốc độ tăng trưởng EPS (%)
                 - Giúp phát hiện cổ phiếu bị định giá thấp/hợp lý/cao
+                - EPS hiện tại (TTM) và EPS forward dự báo
                 """)
             
             with features_col2:
                 st.markdown("""
+                ### 💰 Định giá Price & Analyst Targets
+                
+                **Fireant Valuation (Định giá Fireant)**
+                - Lấy dữ liệu định giá từ Fireant API
+                - Giá trị định giá theo phương pháp tổng hợp (Composed Price)
+                - Cập nhật theo thời gian thực
+                
+                **Analyst Price Targets**
+                - Dự báo giá từ các chuyên gia phân tích (Yahoo Finance)
+                - High/Low/Mean/Median target prices
+                - So sánh với giá hiện tại để tìm cơ hội
+                
                 ### 🔧 Công cụ Hỗ trợ Phân tích
                 
                 **Biểu đồ Tương tác**
-                - Biểu đồ nến kết hợp đường trung bình động
-                - Biểu đồ P/B, P/E, PEG theo thời gian
-                - Đường ngưỡng tham chiếu và cảnh báo
+                - Biểu đồ P/B, P/E, PEG, Price theo thời gian
+                - Đường ngưỡng tham chiếu hiển thị trong legend
+                - Giao diện dark theme hiện đại
                 
                 **Phân tích Đa chiều**
                 - So sánh với ngành và thị trường
                 - Phân tích xu hướng dài hạn
-                - Cảnh báo biến động và tín hiệu mua/bán
+                - Delta metrics hiển thị % chênh lệch
                 
                 **Dữ liệu Thời gian Thực**
-                - Kết nối API với các nguồn dữ liệu uy tín
+                - Kết nối API Fireant, FiinTrade, Yahoo Finance
                 - Cập nhật định kỳ tự động
-                - Xuất dữ liệu báo cáo CSV
                 """)
             
             st.markdown("---")
