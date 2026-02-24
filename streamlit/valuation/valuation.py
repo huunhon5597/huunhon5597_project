@@ -251,22 +251,7 @@ def get_peg(symbol):
             print(f"Giá trị P/E không hợp lệ cho {symbol}")
             return None
         
-        # Import and get token from vci_token
-        try:
-            from vci_token.token import get_token
-            token = get_token()
-        except Exception as e:
-            print(f"Lỗi khi lấy token: {e}")
-            return {
-                'peg_ratio': None,
-                'pe_ratio': pe,
-                'eps_current': None,
-                'eps_forward': None,
-                'eps_growth': None,
-                'note': f'Lỗi lấy token: {e}'
-            }
-        
-        # Get EPS from FiinTrade API
+        # Get EPS from FiinTrade API (no token required)
         url = f"https://wl-fundamental.fiintrade.vn/Snapshot/GetSnapshot?language=vi&OrganCode={symbol}"
         
         headers = {
