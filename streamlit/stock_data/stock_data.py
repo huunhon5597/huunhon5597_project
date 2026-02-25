@@ -51,24 +51,36 @@ _stock_history_cache = {}
 _cache_timestamps = {}
 _CACHE_TTL = 300  # 5 minutes cache TTL
 
-def get_stock_history(symbol, period="day", end_date=None, count_back=252):
+def get_stock_history(symbol, period="day", start_date=None, end_date=None, count_back=None):
     """
-    Lấy dữ liệu giá lịch sử cổ phiếu
+    Lấy dữ liệu giá lịch sử cổ phiếu từ 24hmoney API
     
     Args:
         symbol (str): Mã cổ phiếu (VD: VCB, SSI)
-        period (str): Khung thời gian (day, week, month)
+        period (str): Khung thời gian (day, week, month) - mapped to resolution (1D, 1W, 1M)
+        start_date (str): Ngày bắt đầu (format: YYYY-MM-DD), mặc định 1 năm trước
         end_date (str): Ngày kết thúc (format: YYYY-MM-DD), mặc định hôm nay
-        count_back (int): Số nến lấy về, mặc định 252 (số ngày giao dịch 1 năm)
+        count_back (int): Số ngày lấy về từ end_date (legacy parameter, mặc định 252)
     
     Returns:
         pd.DataFrame: DataFrame chứa dữ liệu OHLCV
     """
+    from datetime import timedelta
+    
+    # Default end_date to today
     if end_date is None:
         end_date = datetime.now().strftime('%Y-%m-%d')
     
+    # Handle count_back for backward compatibility
+    if count_back is not None:
+        # If count_back is provided, calculate start_date from end_date
+        start_date = (datetime.strptime(end_date, '%Y-%m-%d') - timedelta(days=count_back)).strftime('%Y-%m-%d')
+    elif start_date is None:
+        # Default start_date to 1 year ago if not provided
+        start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    
     # Create cache key
-    cache_key = f"{symbol}_{period}_{end_date}_{count_back}"
+    cache_key = f"{symbol}_{period}_{start_date}_{end_date}"
     
     # Check cache
     current_time = time.time()
@@ -77,15 +89,32 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
         if cache_age < _CACHE_TTL:
             return _stock_history_cache[cache_key].copy()
     
+    # Convert dates to Unix timestamps
+    start_date_epoch = int(pd.to_datetime(start_date).timestamp())
     end_date_epoch = int(pd.to_datetime(end_date).timestamp())
     
-    url = f"https://api.vietcap.com.vn/ohlc-chart-service/v1/gap-chart?symbol={symbol}&to={end_date_epoch}&timeFrame=ONE_{period.upper()}&countBack={count_back}"
+    # Map period to resolution
+    resolution_map = {
+        'day': '1D',
+        'week': '1W',
+        'month': '1M'
+    }
+    resolution = resolution_map.get(period.lower(), '1D')
+    
+    url = f"https://24hmoney.vn/dchart/history?symbol={symbol}&resolution={resolution}&from={start_date_epoch}&to={end_date_epoch}"
     
     headers = {
-        'Accept': 'application/json',
-        'Origin': 'https://trading.vietcap.com.vn',
-        'Referer': 'https://trading.vietcap.com.vn/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'accept': '*/*',
+        'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
+        'priority': 'u=1, i',
+        'referer': 'https://24hmoney.vn/stock/MWG/technical-analysis',
+        'sec-ch-ua': '"Chromium";v="140", "Not=A?Brand";v="24", "Opera GX";v="124"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 OPR/124.0.0.0 (Edition globalgames-sd)',
     }
 
     session = _get_session()
@@ -96,11 +125,28 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
         return pd.DataFrame()
     
     try:
-        data = response.json()['data']
-        df = pd.DataFrame(data)
-        df.drop(['symbol', 'accumulatedVolume', 'accumulatedValue', 'minBatchTruncTime'], axis=1, inplace=True, errors='ignore')
+        data = response.json()
+        if 's' in data and data['s'] != 'ok':
+            print(f"API Error: {data.get('s', 'Unknown error')}")
+            return pd.DataFrame()
+            
+        # Handle different response formats
+        if 't' in data:
+            df = pd.DataFrame(data)
+        elif 'data' in data:
+            df = pd.DataFrame(data['data'])
+        else:
+            print(f"Unexpected response format: {data.keys()}")
+            return pd.DataFrame()
+        
+        df.drop(['s'], axis=1, inplace=True, errors='ignore')
         df = df.rename(columns={'t': 'time', 'c': 'close', 'o': 'open', 'h': 'high', 'l': 'low', 'v': 'volume'})
         df = df[['time', 'open', 'high', 'low', 'close', 'volume']]
+        
+        # Scale OHLC values by 1000 (API returns values in different unit)
+        for col in ['open', 'high', 'low', 'close']:
+            df[col] = df[col] * 1000
+        
         df['time'] = pd.to_datetime(df['time'], unit='s').dt.date
         
         # Store in cache
@@ -108,8 +154,8 @@ def get_stock_history(symbol, period="day", end_date=None, count_back=252):
         _cache_timestamps[cache_key] = time.time()
         
         return df
-    except:
-        print(f"Error parsing response")
+    except Exception as e:
+        print(f"Error parsing response: {e}")
         return pd.DataFrame()
 
 # Cache for stock symbols - using a simple dict cache with TTL-like behavior

@@ -13,6 +13,7 @@ import streamlit as st
 from streamlit_echarts import st_echarts
 from datetime import datetime, timedelta
 import pandas as pd
+import pandas_ta as ta
 
 
 # --- Background Job Management ---
@@ -530,7 +531,7 @@ def render_ma_fragment(ma_key, start_date_str, end_date_str):
             if 'ma50' in ma_df.columns:
                 # Custom hover text for MA50
                 ma50_hover = [
-                    f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA50: {ma_df['ma50'].iloc[i]:,.2f}"
+                    f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA50: {ma_df['ma50'].iloc[i]:,.2f}" if pd.notna(ma_df['ma50'].iloc[i]) else f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA50: N/A"
                     for i in range(len(ma_df))
                 ]
                 fig_ma.add_trace(go.Scatter(
@@ -541,7 +542,7 @@ def render_ma_fragment(ma_key, start_date_str, end_date_str):
             if 'ma200' in ma_df.columns:
                 # Custom hover text for MA200
                 ma200_hover = [
-                    f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA200: {ma_df['ma200'].iloc[i]:,.2f}"
+                    f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA200: {ma_df['ma200'].iloc[i]:,.2f}" if pd.notna(ma_df['ma200'].iloc[i]) else f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA200: N/A"
                     for i in range(len(ma_df))
                 ]
                 fig_ma.add_trace(go.Scatter(
@@ -605,11 +606,14 @@ def render_breadth_fragment(bread_key, start_date_str, end_date_str):
                     x=data['time'], y=data['vnindex'], mode='lines',
                     name='VNINDEX', line=dict(color='#51cf66', width=2)
                 ))
+            
             if 'percent' in data.columns:
                 fig_bread.add_trace(go.Scatter(
                     x=data['time'], y=data['percent'], mode='lines',
                     name='Tỷ lệ trên EMA50', line=dict(color='#1f77b4', width=2), yaxis='y2'
                 ))
+            else:
+                st.warning("Dữ liệu Market Breadth không có cột 'percent'. Các cột có sẵn: " + str(data.columns.tolist()))
             
             shapes = [
                 {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y2', 'y0': 0.3, 'y1': 0.3, 'line': {'color': 'red', 'width': 1, 'dash': 'dash'}},
@@ -766,11 +770,11 @@ if main_menu == "Trang chủ":
             # Get date range based on selection
             if vnindex_period == "Tùy chỉnh":
                 days = (vnindex_end_date - vnindex_start_date).days
-                vnindex_data = get_stock_history('VNINDEX', 'day', vnindex_end_date.strftime('%Y-%m-%d'), days)
+                vnindex_data = get_stock_history('VNINDEX', period='day', start_date=vnindex_start_date.strftime('%Y-%m-%d'), end_date=vnindex_end_date.strftime('%Y-%m-%d'))
             else:
                 days_map = {"1 tháng": 30, "3 tháng": 90, "6 tháng": 180, "1 năm": 365, "2 năm": 730}
                 days = days_map.get(vnindex_period, 180)
-                vnindex_data = get_stock_history('VNINDEX', 'day', datetime.now().strftime('%Y-%m-%d'), days)
+                vnindex_data = get_stock_history('VNINDEX', period='day', count_back=days)
             
             with st.spinner(f"Đang tải dữ liệu VNINDEX {vnindex_period}..."):
                 # Data loading is already done above, spinner is for visual feedback
@@ -914,7 +918,7 @@ if main_menu == "Trang chủ":
                 stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
                 
                 try:
-                    current_data = get_stock_history('VNINDEX', 'day', datetime.now().strftime('%Y-%m-%d'), 2)
+                    current_data = get_stock_history('VNINDEX', period='day', count_back=2)
                     if current_data is not None and not current_data.empty and len(current_data) >= 2:
                         latest = current_data.iloc[-1]
                         previous = current_data.iloc[-2]
@@ -2651,7 +2655,7 @@ elif main_menu == "Cổ phiếu":
                             else:
                                 start_date, end_date = get_date_range(price_period)
                             
-                            # Get stock history data
+                            # Get stock history data (need at least 250 days for MA200)
                             price_df = get_stock_history(symbol_price, period="day", end_date=end_date.strftime('%Y-%m-%d'), count_back=365)
                             
                             if price_df is None or price_df.empty:
@@ -2661,6 +2665,9 @@ elif main_menu == "Cổ phiếu":
                                 price_df['time'] = pd.to_datetime(price_df['time'])
                                 price_df = price_df[(price_df['time'] >= pd.to_datetime(start_date)) & (price_df['time'] <= pd.to_datetime(end_date))]
                                 price_df = price_df.sort_values('time')
+                                
+                                # Calculate MA200 using pandas_ta
+                                price_df['ma200'] = ta.sma(price_df['close'], length=200)
                                 
                                 if price_df.empty:
                                     st.warning("Không có dữ liệu trong khoảng thời gian đã chọn.")
@@ -2718,6 +2725,16 @@ elif main_menu == "Cổ phiếu":
                                         fill='tozeroy',
                                         fillcolor='rgba(0, 191, 255, 0.1)',
                                     ))
+                                    
+                                    # Add MA200 line
+                                    if price_df['ma200'].notna().any():
+                                        fig_price.add_trace(go.Scatter(
+                                            x=price_df['time'],
+                                            y=price_df['ma200'],
+                                            mode='lines',
+                                            name='MA200',
+                                            line=dict(color='#FFD700', width=2, dash='solid'),
+                                        ))
                                     
                                     # Add mean line (analyst price target)
                                     if analyst_targets is not None and analyst_targets.get('mean') is not None:

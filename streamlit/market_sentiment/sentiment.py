@@ -380,7 +380,8 @@ def market_breadth(start_date, end_date):
         response1 = session.get(url1, headers=headers1, timeout=10)
         response1.raise_for_status()
         j1 = response1.json()
-    except Exception:
+    except Exception as e:
+        print(f"Error fetching market breadth data: {e}")
         # return empty DataFrame to let caller handle
         return pd.DataFrame()
 
@@ -402,8 +403,11 @@ def market_breadth(start_date, end_date):
 
     data = pd.DataFrame(data_list) if data_list else pd.DataFrame()
     if data.empty:
+        print("Market breadth API returned empty data")
         return pd.DataFrame()
 
+    print(f"Market breadth columns: {data.columns.tolist()}")
+    
     if 'tradingDate' in data.columns:
         data.rename(columns={'tradingDate': 'time'}, inplace=True)
 
@@ -418,15 +422,16 @@ def market_breadth(start_date, end_date):
     days_to_fetch = (end_date_dt - start_date_dt).days + 10  # Thêm buffer 10 ngày
     
     try:
-        vni_df = get_stock_history('VNINDEX', 'day', end_date, days_to_fetch)
+        vni_df = get_stock_history('VNINDEX', period='day', count_back=days_to_fetch)
         if vni_df.empty or 'close' not in vni_df.columns:
             vni_df = pd.DataFrame({'time': [], 'close': []})
         else:
             vni_df = vni_df[['time', 'close']].copy()
             vni_df['time'] = pd.to_datetime(vni_df['time'])
-    except Exception:
+    except Exception as e:
         # If VN-Index data fails, we can still proceed with the breadth data
         # The 'vnindex' column will just be empty (NaN)
+        print(f"Error fetching VNINDEX for market_breadth: {e}")
         vni_df = pd.DataFrame({'time': [], 'close': []})
 
     # Merge dữ liệu
@@ -570,7 +575,7 @@ def ma(start_date, end_date=None):
     # Calculate the number of days to fetch, adding a buffer for the MA calculation
     days_to_fetch = (end_date_dt - start_date_dt).days + 250
 
-    ma_df = get_stock_history('VNINDEX', 'day', end_date, days_to_fetch)
+    ma_df = get_stock_history('VNINDEX', period='day', count_back=days_to_fetch)
     
     if ma_df.empty:
         return pd.DataFrame(columns=['time', 'close', 'open', 'high', 'low', 'ma50', 'ma200'])
