@@ -18,7 +18,7 @@ import pandas_ta as ta
 
 # --- Background Job Management ---
 if "executor" not in st.session_state:
-    st.session_state.executor = ThreadPoolExecutor(max_workers=20)  # Increased to 20 for maximum parallel data loading
+    st.session_state.executor = ThreadPoolExecutor(max_workers=30)  # Increased for maximum parallel data loading
 if "jobs" not in st.session_state:
     st.session_state.jobs = {}  # Stores submitted futures {key: future}
 

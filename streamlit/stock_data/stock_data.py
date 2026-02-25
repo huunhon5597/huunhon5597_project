@@ -15,8 +15,8 @@ def _get_session():
         _session = requests.Session()
         # Configure connection pool with larger size for high concurrency
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=20,  # Number of connection pools to cache
-            pool_maxsize=50,      # Maximum number of connections in pool (increased for high concurrency)
+            pool_connections=30,  # Number of connection pools to cache
+            pool_maxsize=100,     # Maximum number of connections in pool (increased for high concurrency)
             max_retries=3,        # Retry failed requests
             pool_block=False
         )
@@ -49,7 +49,7 @@ def get_listing_date(symbol):
 # Cache for stock history - using a simple dict cache with TTL-like behavior
 _stock_history_cache = {}
 _cache_timestamps = {}
-_CACHE_TTL = 300  # 5 minutes cache TTL
+_CACHE_TTL = 1800  # 30 minutes cache TTL
 
 def get_stock_history(symbol, period="day", start_date=None, end_date=None, count_back=None):
     """

@@ -24,8 +24,8 @@ def _get_session():
     if _session is None:
         _session = requests.Session()
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=20,
-            pool_maxsize=50,  # Increased for high concurrency
+            pool_connections=30,
+            pool_maxsize=100,  # Increased for high concurrency
             max_retries=3,
             pool_block=False
         )
@@ -311,8 +311,8 @@ def high_low_index(start_date, end_date=None):
         except Exception:
             return None
     
-    # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
-    max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
+    # Sử dụng ThreadPoolExecutor với số lượng worker tăng lên để xử lý nhanh hơn
+    max_workers = min(20, len(hose_list))  # Tăng số worker lên 20
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tất cả các task cùng lúc
         futures = {executor.submit(process_stock, symbol, start, end): symbol for symbol in hose_list}
@@ -518,8 +518,8 @@ def bpi(start_date, end_date=None):
         except Exception:
             return None, None
     
-    # Sử dụng ThreadPoolExecutor với số lượng worker giảm để tránh rate limiting
-    max_workers = min(10, len(hose_list))  # Giảm số worker xuống 10 để tránh rate limiting
+    # Sử dụng ThreadPoolExecutor với số lượng worker tăng lên để xử lý nhanh hơn
+    max_workers = min(20, len(hose_list))  # Tăng số worker lên 20
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tất cả các task cùng lúc
         futures = {executor.submit(process_stock_for_bpi, symbol, start_date_dt, end_date_dt): symbol for symbol in hose_list}
