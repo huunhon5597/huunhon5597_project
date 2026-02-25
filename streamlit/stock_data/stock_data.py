@@ -143,9 +143,14 @@ def get_stock_history(symbol, period="day", start_date=None, end_date=None, coun
         df = df.rename(columns={'t': 'time', 'c': 'close', 'o': 'open', 'h': 'high', 'l': 'low', 'v': 'volume'})
         df = df[['time', 'open', 'high', 'low', 'close', 'volume']]
         
-        # Scale OHLC values by 1000 (API returns values in different unit)
-        for col in ['open', 'high', 'low', 'close']:
-            df[col] = df[col] * 1000
+        # Check if this is an index (VNINDEX, HNXINDEX, UPCOMINDEX)
+        # Index values from API don't need scaling, but stocks do
+        is_index = symbol.upper() in ['VNINDEX', 'HNXINDEX', 'UPCOMINDEX', 'VN30', 'HNX30']
+        
+        if not is_index:
+            # Scale OHLC values by 1000 for stocks (API returns values in different unit)
+            for col in ['open', 'high', 'low', 'close']:
+                df[col] = df[col] * 1000
         
         df['time'] = pd.to_datetime(df['time'], unit='s').dt.date
         
