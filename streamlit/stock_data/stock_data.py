@@ -161,7 +161,12 @@ def get_stock_history(symbol, period="day", start_date=None, end_date=None, coun
 # Cache for stock symbols - using a simple dict cache with TTL-like behavior
 # Now caches by exchange to support multiple exchanges
 _symbols_cache_dict = {}
-_SYMBOLS_CACHE_TTL = 300  # 5 minutes cache TTL
+_SYMBOLS_CACHE_TTL = 1800  # 30 minutes cache TTL
+
+# Cache for investor type data
+_investor_type_cache = {}
+_investor_type_cache_timestamps = {}
+_INVESTOR_TYPE_CACHE_TTL = 1800  # 30 minutes cache TTL
 
 def get_stock_symbols(exchange='HOSE'):
     """
@@ -262,6 +267,16 @@ def investor_type(symbol='VN-Index', start_date=None, end_date=None):
     if end_date is None:
         end_date = datetime.date.today().strftime('%Y-%m-%d')
     
+    # Create cache key
+    cache_key = f"{symbol}_{start_date}_{end_date}"
+    
+    # Check cache
+    current_time = time.time()
+    if cache_key in _investor_type_cache:
+        cache_age = current_time - _investor_type_cache_timestamps.get(cache_key, 0)
+        if cache_age < _INVESTOR_TYPE_CACHE_TTL:
+            return _investor_type_cache[cache_key].copy()
+    
     # Định dạng lại ngày cho URL
     start_date_formatted = datetime.datetime.strptime(start_date, '%Y-%m-%d').date().strftime('%d/%m/%Y')
     end_date_formatted = datetime.datetime.strptime(end_date, '%Y-%m-%d').date().strftime('%d/%m/%Y')
@@ -321,5 +336,9 @@ def investor_type(symbol='VN-Index', start_date=None, end_date=None):
     all_data['Ngày'] = pd.to_datetime(all_data['Ngày'], format='%d/%m/%Y')
     all_data = all_data.sort_values('Ngày')
     all_data = all_data.reset_index(drop=True)
+    
+    # Store in cache
+    _investor_type_cache[cache_key] = all_data.copy()
+    _investor_type_cache_timestamps[cache_key] = time.time()
     
     return all_data
