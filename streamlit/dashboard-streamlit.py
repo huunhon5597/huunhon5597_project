@@ -2120,8 +2120,8 @@ elif main_menu == "Cổ phiếu":
                     val = thresholds.get(k)
                     if val is not None and not pd.isna(val):
                         try:
-                            # Add delta for PB TTM Avg
-                            if k == 'pb_ttm_avg' and pb_latest is not None:
+                            # Add delta for all metrics
+                            if pb_latest is not None:
                                 pb_diff = ((val - pb_latest) / pb_latest) * 100 if pb_latest != 0 else 0
                                 cols[i].metric(label, f"{float(val):.2f}", delta=f"{pb_diff:+.1f}%", delta_color="normal")
                             else:
@@ -2222,6 +2222,34 @@ elif main_menu == "Cổ phiếu":
             
             st.plotly_chart(fig_pb, use_container_width=True)
 
+            # Summary section for P/B
+            st.markdown("---")
+            st.subheader("📋 Tổng hợp P/B")
+            
+            # Get current values
+            pb_latest = pb_df['pb'].dropna().iloc[-1] if not pb_df['pb'].dropna().empty else None
+            current_price = pb_df['price'].dropna().iloc[-1] if 'price' in pb_df.columns and not pb_df['price'].dropna().empty else None
+            pb_ttm_avg = thresholds.get('pb_ttm_avg') if thresholds else None
+            
+            if pb_latest is not None and current_price is not None and pb_ttm_avg is not None and pb_ttm_avg != 0:
+                # Calculate fair price based on PB TTM Avg
+                fair_price = current_price * (pb_ttm_avg / pb_latest)
+                price_diff = ((fair_price - current_price) / current_price) * 100
+                
+                sum_cols = st.columns(4)
+                sum_cols[0].metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                sum_cols[1].metric("P/B hiện tại", f"{pb_latest:.2f}")
+                sum_cols[2].metric("PB TTM Avg", f"{pb_ttm_avg:.2f}")
+                sum_cols[3].metric("Giá hợp lý (PB TTM Avg)", f"{fair_price:,.0f} VND", delta=f"{price_diff:+.1f}%", delta_color="normal")
+            elif pb_latest is not None and current_price is not None:
+                sum_cols = st.columns(3)
+                sum_cols[0].metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                sum_cols[1].metric("P/B hiện tại", f"{pb_latest:.2f}")
+                if pb_ttm_avg is not None:
+                    sum_cols[2].metric("PB TTM Avg", f"{pb_ttm_avg:.2f}")
+                else:
+                    sum_cols[2].metric("PB TTM Avg", "N/A")
+
             with st.expander("Xem dữ liệu P/B chi tiết"):
                 st.dataframe(pb_df.rename(columns={'date': 'time'}), width='stretch')
                 st.download_button("Tải xuống P/B CSV", pb_df.to_csv(index=False), f"pb_{symbol}.csv", "text/csv")
@@ -2271,8 +2299,8 @@ elif main_menu == "Cổ phiếu":
                     val = thresholds.get(k)
                     if val is not None and not pd.isna(val):
                         try:
-                            # Add delta for PE TTM Avg
-                            if k == 'pe_ttm_avg' and pe_latest is not None:
+                            # Add delta for all metrics
+                            if pe_latest is not None:
                                 pe_diff = ((val - pe_latest) / pe_latest) * 100 if pe_latest != 0 else 0
                                 cols[i].metric(label, f"{float(val):.2f}", delta=f"{pe_diff:+.1f}%", delta_color="normal")
                             else:
@@ -2372,6 +2400,35 @@ elif main_menu == "Cổ phiếu":
                 )
             
             st.plotly_chart(fig_pe, use_container_width=True)
+
+            # Summary section for P/E
+            st.markdown("---")
+            st.subheader("📋 Tổng hợp P/E")
+            
+            # Get current values
+            pe_col = 'pe' if 'pe' in pe_df.columns else ('pe_ttm' if 'pe_ttm' in pe_df.columns else None)
+            pe_latest = pe_df[pe_col].dropna().iloc[-1] if pe_col and not pe_df[pe_col].dropna().empty else None
+            current_price = pe_df['price'].dropna().iloc[-1] if 'price' in pe_df.columns and not pe_df['price'].dropna().empty else None
+            pe_ttm_avg = thresholds.get('pe_ttm_avg') if thresholds else None
+            
+            if pe_latest is not None and current_price is not None and pe_ttm_avg is not None and pe_ttm_avg != 0:
+                # Calculate fair price based on PE TTM Avg
+                fair_price = current_price * (pe_ttm_avg / pe_latest)
+                price_diff = ((fair_price - current_price) / current_price) * 100
+                
+                sum_cols = st.columns(4)
+                sum_cols[0].metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                sum_cols[1].metric("P/E hiện tại", f"{pe_latest:.2f}")
+                sum_cols[2].metric("PE TTM Avg", f"{pe_ttm_avg:.2f}")
+                sum_cols[3].metric("Giá hợp lý (PE TTM Avg)", f"{fair_price:,.0f} VND", delta=f"{price_diff:+.1f}%", delta_color="normal")
+            elif pe_latest is not None and current_price is not None:
+                sum_cols = st.columns(3)
+                sum_cols[0].metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                sum_cols[1].metric("P/E hiện tại", f"{pe_latest:.2f}")
+                if pe_ttm_avg is not None:
+                    sum_cols[2].metric("PE TTM Avg", f"{pe_ttm_avg:.2f}")
+                else:
+                    sum_cols[2].metric("PE TTM Avg", "N/A")
 
             with st.expander("Xem dữ liệu P/E chi tiết"):
                 st.dataframe(pe_df.rename(columns={'date': 'time'}), use_container_width=True)
