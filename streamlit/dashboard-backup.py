@@ -1,7 +1,9 @@
 import sys
 import os
 import time
+import json
 import numpy as np
+import requests
 from concurrent.futures import ThreadPoolExecutor
 
 # Add the parent directory to the path to allow imports from modules
@@ -13,11 +15,12 @@ import streamlit as st
 from streamlit_echarts import st_echarts
 from datetime import datetime, timedelta
 import pandas as pd
+import pandas_ta as ta
 
 
 # --- Background Job Management ---
 if "executor" not in st.session_state:
-    st.session_state.executor = ThreadPoolExecutor(max_workers=20)  # Increased to 20 for maximum parallel data loading
+    st.session_state.executor = ThreadPoolExecutor(max_workers=30)  # Increased for maximum parallel data loading
 if "jobs" not in st.session_state:
     st.session_state.jobs = {}  # Stores submitted futures {key: future}
 
@@ -173,7 +176,7 @@ def render_sentiment_fragment(sent_key, start_date_str, end_date_str):
     import plotly.graph_objects as go
     
     with st.container():
-        st.subheader("🧠 Tâm lý Thị trường")
+        st.subheader("🧠 Tâm lý Thị trường & VNINDEX")
         status, data = get_job_status(sent_key)
 
         if status == "running":
@@ -183,54 +186,29 @@ def render_sentiment_fragment(sent_key, start_date_str, end_date_str):
         elif status == "completed" and data is not None and not data.empty and any(c in data.columns for c in ['short', 'long', 'close']):
             data['time'] = pd.to_datetime(data['time'])
             
-            st.subheader("📈 VN-Index")
-            fig_vnindex = go.Figure()
+            fig = go.Figure()
             
+            # Add VNINDEX on right Y-axis
             if 'close' in data.columns:
-                fig_vnindex.add_trace(go.Scatter(
+                fig.add_trace(go.Scatter(
                     x=data['time'], y=data['close'], mode='lines',
-                    name='VNINDEX Close', line=dict(color='green')
+                    name='VNINDEX', line=dict(color='green', width=2),
+                    yaxis='y2'
                 ))
             
-            fig_vnindex.update_layout(
-                title=f'VN-Index ({start_date_str} to {end_date_str})',
-                xaxis_title='Date', yaxis_title='Close Price',
-                height=300, hovermode='x unified', showlegend=False,
-                margin=dict(l=20, r=20, t=40, b=20)
-            )
-            st.plotly_chart(fig_vnindex, width='stretch')
-            
-            st.subheader("🎯 Ngưỡng Tâm lý Thị trường")
-            cols = st.columns(5)
-            thresholds = [
-                ("Extreme Greed", "80-100", "#006400"),
-                ("Greed", "60-80", "#2ca02c"),
-                ("Neutral", "40-60", "#ffd700"),
-                ("Fear", "20-40", "#8b0000"),
-                ("Extreme Fear", "0-20", "#8b0000")
-            ]
-            for i, (label, range_val, color) in enumerate(thresholds):
-                cols[i].markdown(f"""
-                <div style="text-align: center; padding: 10px; border: 2px solid {color}; border-radius: 5px; background-color: white;">
-                    <div style="font-size: 12px; font-weight: bold; color: {color};">{label}</div>
-                    <div style="font-size: 16px; font-weight: bold; color: {color};">{range_val}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            st.subheader("📊 Tâm lý Thị trường: Long vs Short")
-            fig_sent = go.Figure()
-            
+            # Add Sentiment on left Y-axis
             if 'long' in data.columns:
-                fig_sent.add_trace(go.Scatter(
+                fig.add_trace(go.Scatter(
                     x=data['time'], y=data['long'], mode='lines',
-                    name='Long (trung hạn)', line=dict(color='#1f77b4')
+                    name='Long (trung hạn)', line=dict(color='#1f77b4', width=1.5)
                 ))
             if 'short' in data.columns:
-                fig_sent.add_trace(go.Scatter(
+                fig.add_trace(go.Scatter(
                     x=data['time'], y=data['short'], mode='lines',
-                    name='Short (ngắn hạn)', line=dict(color='#ff7f0e')
+                    name='Short (ngắn hạn)', line=dict(color='#ff7f0e', width=1.5)
                 ))
             
+            # Add background bands for sentiment zones
             bands = [
                 (80, 100, '#006400', 0.15), (60, 80, '#2ca02c', 0.12),
                 (40, 60, '#ffd700', 0.12), (20, 40, '#ff7f7f', 0.12),
@@ -249,18 +227,46 @@ def render_sentiment_fragment(sent_key, start_date_str, end_date_str):
                     'type': 'line', 'xref': 'x', 'yref': 'y',
                     'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
                     'y0': thr, 'y1': thr,
-                    'line': {'color': 'white', 'width': 1, 'dash': 'dash'}
+                    'line': {'color': 'gray', 'width': 1, 'dash': 'dash'}
                 })
             
-            fig_sent.update_layout(
+            fig.update_layout(
+                xaxis_title='Date',
+                yaxis=dict(
+                    title=dict(text='Sentiment', font=dict(color='#1f77b4')),
+                    tickfont=dict(color='#1f77b4'),
+                    range=[0, 100],
+                    side='left'
+                ),
+                yaxis2=dict(
+                    title=dict(text='VNINDEX', font=dict(color='green')),
+                    tickfont=dict(color='green'),
+                    overlaying='y',
+                    side='right'
+                ),
                 shapes=shapes,
-                title=f'Market Sentiment Historical ({start_date_str} to {end_date_str})',
-                xaxis_title='Date', yaxis_title='Sentiment',
-                height=300, hovermode='x unified', showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(l=20, r=20, t=40, b=60)
+                height=400, hovermode='x unified',
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+                margin=dict(l=60, r=60, t=60, b=20)
             )
-            st.plotly_chart(fig_sent, width='stretch')
+            st.plotly_chart(fig, width='stretch')
+            
+            st.subheader("🎯 Ngưỡng Tâm lý Thị trường")
+            cols = st.columns(5)
+            thresholds = [
+                ("Extreme Greed", "80-100", "#006400"),
+                ("Greed", "60-80", "#2ca02c"),
+                ("Neutral", "40-60", "#ffd700"),
+                ("Fear", "20-40", "#8b0000"),
+                ("Extreme Fear", "0-20", "#8b0000")
+            ]
+            for i, (label, range_val, color) in enumerate(thresholds):
+                cols[i].markdown(f"""
+                <div style="text-align: center; padding: 10px; border: 2px solid {color}; border-radius: 5px; background-color: white;">
+                    <div style="font-size: 12px; font-weight: bold; color: {color};">{label}</div>
+                    <div style="font-size: 16px; font-weight: bold; color: {color};">{range_val}</div>
+                </div>
+                """, unsafe_allow_html=True)
             
             if f"{sent_key}_start_time" in st.session_state:
                 loading_time_key = f"{sent_key}_loading_time"
@@ -383,24 +389,45 @@ def render_highlow_fragment(hl_key, start_date_str, end_date_str):
                 if 'hl_index' in data.columns:
                     fig_hl.add_trace(go.Scatter(
                         x=data['time'], y=data['hl_index'], mode='lines',
-                        name='HL Index', line=dict(color='#1f77b4')
+                        name='HL Index', line=dict(color='#1f77b4', width=2),
+                        fill='tozeroy', fillcolor='rgba(31, 119, 180, 0.2)'
                     ))
                 
+                # Add colored background zones for overbought/oversold
                 shapes = [
-                    {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y', 'y0': 30, 'y1': 30, 'line': {'color': 'green', 'width': 1, 'dash': 'dash'}},
-                    {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y', 'y0': 70, 'y1': 70, 'line': {'color': 'red', 'width': 1, 'dash': 'dash'}}
+                    # Oversold zone (0-30)
+                    {'type': 'rect', 'xref': 'x', 'yref': 'y', 
+                     'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                     'y0': 0, 'y1': 30,
+                     'fillcolor': 'rgba(46, 204, 113, 0.15)', 'layer': 'below', 'line': {'width': 0}},
+                    # Neutral zone (30-70)
+                    {'type': 'rect', 'xref': 'x', 'yref': 'y', 
+                     'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                     'y0': 30, 'y1': 70,
+                     'fillcolor': 'rgba(241, 196, 15, 0.1)', 'layer': 'below', 'line': {'width': 0}},
+                    # Overbought zone (70-100)
+                    {'type': 'rect', 'xref': 'x', 'yref': 'y', 
+                     'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                     'y0': 70, 'y1': 100,
+                     'fillcolor': 'rgba(231, 76, 60, 0.15)', 'layer': 'below', 'line': {'width': 0}},
+                    # Reference lines
+                    {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y', 'y0': 30, 'y1': 30, 'line': {'color': 'green', 'width': 1.5, 'dash': 'dash'}},
+                    {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y', 'y0': 70, 'y1': 70, 'line': {'color': 'red', 'width': 1.5, 'dash': 'dash'}}
                 ]
                 fig_hl.update_layout(
-                    title=f'High-Low Index Historical ({start_date_str} to {end_date_str})',
-                    xaxis_title='Date', yaxis=dict(title='Index Value', showgrid=False),
-                    height=350, hovermode='x unified', showlegend=False,
-                    margin=dict(l=20, r=20, t=40, b=20), shapes=shapes,
+                    xaxis_title='Date', 
+                    yaxis=dict(title='HL Index', range=[0, 100], showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
+                    height=400, hovermode='x unified', showlegend=True,
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+                    margin=dict(l=50, r=50, t=60, b=50), 
+                    shapes=shapes,
                     annotations=[
-                        dict(x=0.98, y=70, xref="paper", yref="y", text="Overbought", showarrow=False, xanchor="right", font=dict(color="red", size=12)),
-                        dict(x=0.98, y=30, xref="paper", yref="y", text="Oversold", showarrow=False, xanchor="right", font=dict(color="green", size=12))
+                        dict(x=0.02, y=85, xref='paper', yref='y', text='🔴 Overbought', showarrow=False, xanchor='left', font=dict(color='#c0392b', size=11, weight='bold')),
+                        dict(x=0.02, y=50, xref='paper', yref='y', text='🟡 Neutral', showarrow=False, xanchor='left', font=dict(color='#f39c12', size=11, weight='bold')),
+                        dict(x=0.02, y=15, xref='paper', yref='y', text='🟢 Oversold', showarrow=False, xanchor='left', font=dict(color='#27ae60', size=11, weight='bold'))
                     ]
                 )
-                fig_hl.update_xaxes(showgrid=False)
+                fig_hl.update_xaxes(showgrid=False, zeroline=False)
                 st.plotly_chart(fig_hl, width='stretch')
                 
                 if f"{hl_key}_start_time" in st.session_state:
@@ -440,20 +467,42 @@ def render_bpi_fragment(bpi_key, start_date_str, end_date_str):
                 if 'bpi' in data.columns:
                     fig_bpi.add_trace(go.Scatter(
                         x=data['time'], y=data['bpi'], mode='lines',
-                        name='BPI', line=dict(color='#1f77b4')
+                        name='BPI', line=dict(color='#9b59b6', width=2),
+                        fill='tozeroy', fillcolor='rgba(155, 89, 182, 0.2)'
                     ))
                 
-                fig_bpi.add_hline(y=70, line_dash="dash", line_color="red")
-                fig_bpi.add_hline(y=30, line_dash="dash", line_color="green")
-                fig_bpi.add_annotation(x=0.98, y=70, xref="paper", yref="y", text="Overbought", showarrow=False, xanchor="right", font=dict(color="red", size=12))
-                fig_bpi.add_annotation(x=0.98, y=30, xref="paper", yref="y", text="Oversold", showarrow=False, xanchor="right", font=dict(color="green", size=12))
+                # Add colored background zones
+                shapes = [
+                    # Oversold zone (0-30)
+                    {'type': 'rect', 'xref': 'x', 'yref': 'y', 
+                     'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                     'y0': 0, 'y1': 30,
+                     'fillcolor': 'rgba(46, 204, 113, 0.15)', 'layer': 'below', 'line': {'width': 0}},
+                    # Neutral zone (30-70)
+                    {'type': 'rect', 'xref': 'x', 'yref': 'y', 
+                     'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                     'y0': 30, 'y1': 70,
+                     'fillcolor': 'rgba(241, 196, 15, 0.1)', 'layer': 'below', 'line': {'width': 0}},
+                    # Overbought zone (70-100)
+                    {'type': 'rect', 'xref': 'x', 'yref': 'y', 
+                     'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                     'y0': 70, 'y1': 100,
+                     'fillcolor': 'rgba(231, 76, 60, 0.15)', 'layer': 'below', 'line': {'width': 0}},
+                ]
                 
                 fig_bpi.update_layout(
-                    title=f'Bullish Percent Index Historical ({start_date_str} to {end_date_str})',
-                    xaxis_title='Date', yaxis_title='BPI (%)',
-                    height=350, hovermode='x unified', showlegend=False,
-                    yaxis=dict(range=[0, 100]), margin=dict(l=20, r=20, t=40, b=20)
+                    xaxis_title='Date', yaxis_title='BPI (%)', 
+                    yaxis=dict(range=[0, 100], showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
+                    height=400, hovermode='x unified', showlegend=True,
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+                    margin=dict(l=50, r=50, t=60, b=50),
+                    shapes=shapes,
+                    annotations=[
+                        dict(x=0.98, y=70, xref='paper', yref='y', text='🔴 Overbought (70)', showarrow=False, xanchor='right', font=dict(color='#c0392b', size=11, weight='bold')),
+                        dict(x=0.98, y=30, xref='paper', yref='y', text='🟢 Oversold (30)', showarrow=False, xanchor='right', font=dict(color='#27ae60', size=11, weight='bold'))
+                    ]
                 )
+                fig_bpi.update_xaxes(showgrid=False, zeroline=False)
                 st.plotly_chart(fig_bpi, width='stretch')
                 
                 if f"{bpi_key}_start_time" in st.session_state:
@@ -530,7 +579,7 @@ def render_ma_fragment(ma_key, start_date_str, end_date_str):
             if 'ma50' in ma_df.columns:
                 # Custom hover text for MA50
                 ma50_hover = [
-                    f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA50: {ma_df['ma50'].iloc[i]:,.2f}"
+                    f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA50: {ma_df['ma50'].iloc[i]:,.2f}" if pd.notna(ma_df['ma50'].iloc[i]) else f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA50: N/A"
                     for i in range(len(ma_df))
                 ]
                 fig_ma.add_trace(go.Scatter(
@@ -541,7 +590,7 @@ def render_ma_fragment(ma_key, start_date_str, end_date_str):
             if 'ma200' in ma_df.columns:
                 # Custom hover text for MA200
                 ma200_hover = [
-                    f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA200: {ma_df['ma200'].iloc[i]:,.2f}"
+                    f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA200: {ma_df['ma200'].iloc[i]:,.2f}" if pd.notna(ma_df['ma200'].iloc[i]) else f"Date: {ma_df['time'].iloc[i].strftime('%Y-%m-%d')}<br>MA200: N/A"
                     for i in range(len(ma_df))
                 ]
                 fig_ma.add_trace(go.Scatter(
@@ -551,10 +600,21 @@ def render_ma_fragment(ma_key, start_date_str, end_date_str):
                 ))
             
             fig_ma.update_layout(
-                title=f'Moving Average Historical ({start_date_str} to {end_date_str})',
-                height=500, template='plotly_white', showlegend=True,
-                xaxis_rangeslider_visible=False, margin=dict(l=20, r=20, t=40, b=20),
-                bargap=0, bargroupgap=0
+                title=f'📊 Moving Average - VNINDEX',
+                height=500, 
+                template='plotly_white', 
+                showlegend=True,
+                legend=dict(
+                    orientation='h',
+                    yanchor='bottom',
+                    y=1.02,
+                    xanchor='center',
+                    x=0.5
+                ),
+                xaxis_rangeslider_visible=False, 
+                margin=dict(l=50, r=50, t=60, b=50),
+                bargap=0, 
+                bargroupgap=0
             )
             # Use category-based x-axis (no gaps between candles)
             fig_ma.update_xaxes(
@@ -564,9 +624,10 @@ def render_ma_fragment(ma_key, start_date_str, end_date_str):
                 tickangle=45,
                 showgrid=False,
                 zeroline=False,
-                showticklabels=True
+                showticklabels=True,
+                title_text='Thời gian'
             )
-            fig_ma.update_yaxes(title_text="Price")
+            fig_ma.update_yaxes(title_text="Giá", showgrid=True, gridcolor='rgba(128,128,128,0.2)')
             st.plotly_chart(fig_ma, width='stretch')
             
             if f"{ma_key}_start_time" in st.session_state:
@@ -603,27 +664,54 @@ def render_breadth_fragment(bread_key, start_date_str, end_date_str):
             if 'vnindex' in data.columns:
                 fig_bread.add_trace(go.Scatter(
                     x=data['time'], y=data['vnindex'], mode='lines',
-                    name='VNINDEX', line=dict(color='#51cf66', width=2)
+                    name='VNINDEX', line=dict(color='#51cf66', width=2.5)
                 ))
+            
             if 'percent' in data.columns:
                 fig_bread.add_trace(go.Scatter(
                     x=data['time'], y=data['percent'], mode='lines',
-                    name='Tỷ lệ trên EMA50', line=dict(color='#1f77b4', width=2), yaxis='y2'
+                    name='Tỷ lệ trên EMA50', line=dict(color='#3498db', width=2), yaxis='y2',
+                    fill='tozeroy', fillcolor='rgba(52, 152, 219, 0.15)'
                 ))
+            else:
+                st.warning("Dữ liệu Market Breadth không có cột 'percent'. Các cột có sẵn: " + str(data.columns.tolist()))
             
+            # Add colored background zones for percentage
             shapes = [
-                {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y2', 'y0': 0.3, 'y1': 0.3, 'line': {'color': 'red', 'width': 1, 'dash': 'dash'}},
-                {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y2', 'y0': 0.7, 'y1': 0.7, 'line': {'color': 'red', 'width': 1, 'dash': 'dash'}}
+                # Bearish zone (0-0.3)
+                {'type': 'rect', 'xref': 'x', 'yref': 'y2', 
+                 'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                 'y0': 0, 'y1': 0.3,
+                 'fillcolor': 'rgba(231, 76, 60, 0.15)', 'layer': 'below', 'line': {'width': 0}},
+                # Neutral zone (0.3-0.7)
+                {'type': 'rect', 'xref': 'x', 'yref': 'y2', 
+                 'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                 'y0': 0.3, 'y1': 0.7,
+                 'fillcolor': 'rgba(241, 196, 15, 0.1)', 'layer': 'below', 'line': {'width': 0}},
+                # Bullish zone (0.7-1.0)
+                {'type': 'rect', 'xref': 'x', 'yref': 'y2', 
+                 'x0': pd.Timestamp(data['time'].min()), 'x1': pd.Timestamp(data['time'].max()),
+                 'y0': 0.7, 'y1': 1.0,
+                 'fillcolor': 'rgba(46, 204, 113, 0.15)', 'layer': 'below', 'line': {'width': 0}},
+                # Reference lines
+                {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y2', 'y0': 0.3, 'y1': 0.3, 'line': {'color': '#e74c3c', 'width': 1.5, 'dash': 'dash'}},
+                {'type': 'line', 'xref': 'paper', 'x0': 0, 'x1': 1, 'yref': 'y2', 'y0': 0.7, 'y1': 0.7, 'line': {'color': '#27ae60', 'width': 1.5, 'dash': 'dash'}}
             ]
             fig_bread.update_layout(
-                title=f'VNINDEX và Tỷ lệ Cổ phiếu trên EMA50 ({start_date_str} to {end_date_str})',
-                xaxis_title='Date', yaxis=dict(title='VNINDEX', side='left', showgrid=False),
-                yaxis2=dict(title='Tỷ lệ trên EMA50', side='right', overlaying='y', range=[0, 1], showgrid=False),
-                height=350, hovermode='x unified',
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                shapes=shapes
+                xaxis_title='Date', 
+                yaxis=dict(title=dict(text='VNINDEX', font=dict(color='#51cf66')), side='left', showgrid=True, gridcolor='rgba(128,128,128,0.2)', tickfont=dict(color='#51cf66')),
+                yaxis2=dict(title=dict(text='Tỷ lệ EMA50', font=dict(color='#3498db')), side='right', overlaying='y', range=[0, 1], showgrid=False, tickfont=dict(color='#3498db'), tickformat='.0%'),
+                height=450, hovermode='x unified',
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+                shapes=shapes,
+                margin=dict(l=50, r=50, t=60, b=50),
+                annotations=[
+                    dict(x=0.02, y=0.85, xref='paper', yref='y2', text='🟢 Bullish (>70%)', showarrow=False, xanchor='left', font=dict(color='#27ae60', size=11, weight='bold')),
+                    dict(x=0.02, y=0.5, xref='paper', yref='y2', text='🟡 Neutral', showarrow=False, xanchor='left', font=dict(color='#f39c12', size=11, weight='bold')),
+                    dict(x=0.02, y=0.15, xref='paper', yref='y2', text='🔴 Bearish (<30%)', showarrow=False, xanchor='left', font=dict(color='#c0392b', size=11, weight='bold'))
+                ]
             )
-            fig_bread.update_xaxes(showgrid=False)
+            fig_bread.update_xaxes(showgrid=False, zeroline=False)
             st.plotly_chart(fig_bread, width='stretch')
             
             if f"{bread_key}_start_time" in st.session_state:
@@ -676,7 +764,7 @@ if "prev_main_menu" not in st.session_state:
 
 main_menu = st.sidebar.selectbox(
     "Menu chính", 
-    ["Trang chủ", "Thị trường", "Cổ phiếu"], 
+    ["Trang chủ", "Thị trường", "Cổ phiếu", "Test"], 
     index=0, 
     key="main_menu",
     on_change=clear_content_on_menu_change
@@ -766,11 +854,11 @@ if main_menu == "Trang chủ":
             # Get date range based on selection
             if vnindex_period == "Tùy chỉnh":
                 days = (vnindex_end_date - vnindex_start_date).days
-                vnindex_data = get_stock_history('VNINDEX', 'day', vnindex_end_date.strftime('%Y-%m-%d'), days)
+                vnindex_data = get_stock_history('VNINDEX', period='day', start_date=vnindex_start_date.strftime('%Y-%m-%d'), end_date=vnindex_end_date.strftime('%Y-%m-%d'))
             else:
                 days_map = {"1 tháng": 30, "3 tháng": 90, "6 tháng": 180, "1 năm": 365, "2 năm": 730}
                 days = days_map.get(vnindex_period, 180)
-                vnindex_data = get_stock_history('VNINDEX', 'day', datetime.now().strftime('%Y-%m-%d'), days)
+                vnindex_data = get_stock_history('VNINDEX', period='day', count_back=days)
             
             with st.spinner(f"Đang tải dữ liệu VNINDEX {vnindex_period}..."):
                 # Data loading is already done above, spinner is for visual feedback
@@ -914,7 +1002,7 @@ if main_menu == "Trang chủ":
                 stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
                 
                 try:
-                    current_data = get_stock_history('VNINDEX', 'day', datetime.now().strftime('%Y-%m-%d'), 2)
+                    current_data = get_stock_history('VNINDEX', period='day', count_back=2)
                     if current_data is not None and not current_data.empty and len(current_data) >= 2:
                         latest = current_data.iloc[-1]
                         previous = current_data.iloc[-2]
@@ -1480,29 +1568,37 @@ elif main_menu == "Thị trường":
                                 hoverinfo='text'
                             ), secondary_y=True)
                     
-                    # Update layout with increased top margin for title-legend spacing
+                    # Update layout with improved visual hierarchy
                     fig_investor.update_layout(
                         title=dict(
-                            text=f'Phân loại Nhà đầu tư - {symbol_investor} ({investor_start_date.strftime("%Y-%m-%d")} đến {investor_end_date.strftime("%Y-%m-%d")})',
-                            y=0.95,
+                            text=f'💰 Phân loại Nhà đầu tư - {symbol_investor}',
+                            y=0.98,
                             x=0.5,
                             xanchor='center',
-                            yanchor='top'
+                            yanchor='top',
+                            font=dict(size=18)
                         ),
                         barmode='relative',
                         xaxis_title='Thời gian',
-                        yaxis_title='Giá trị giao dịch ròng',
+                        yaxis_title='Giá trị giao dịch ròng (tỷ đồng)',
                         yaxis2_title='Giá đóng cửa',
-                        height=550,
+                        height=500,
                         hovermode='x unified',
-                        showlegend=False,
-                        margin=dict(l=60, r=60, t=80, b=60),
-                        bargap=0.15,
+                        showlegend=True,
+                        legend=dict(
+                            orientation='h',
+                            yanchor='bottom',
+                            y=1.08,
+                            xanchor='center',
+                            x=0.5
+                        ),
+                        margin=dict(l=60, r=60, t=100, b=60),
+                        bargap=0.2,
                         bargroupgap=0.1
                     )
                     
                     fig_investor.update_xaxes(showgrid=False, zeroline=False)
-                    fig_investor.update_yaxes(showgrid=False, secondary_y=False)
+                    fig_investor.update_yaxes(showgrid=True, gridcolor='rgba(128,128,128,0.2)', secondary_y=False)
                     fig_investor.update_yaxes(showgrid=False, secondary_y=True)
                     
                     st.plotly_chart(fig_investor, width='stretch')
@@ -2026,8 +2122,8 @@ elif main_menu == "Cổ phiếu":
                     val = thresholds.get(k)
                     if val is not None and not pd.isna(val):
                         try:
-                            # Add delta for PB TTM Avg
-                            if k == 'pb_ttm_avg' and pb_latest is not None:
+                            # Add delta for all metrics
+                            if pb_latest is not None:
                                 pb_diff = ((val - pb_latest) / pb_latest) * 100 if pb_latest != 0 else 0
                                 cols[i].metric(label, f"{float(val):.2f}", delta=f"{pb_diff:+.1f}%", delta_color="normal")
                             else:
@@ -2128,6 +2224,34 @@ elif main_menu == "Cổ phiếu":
             
             st.plotly_chart(fig_pb, use_container_width=True)
 
+            # Summary section for P/B
+            st.markdown("---")
+            st.subheader("📋 Tổng hợp P/B")
+            
+            # Get current values
+            pb_latest = pb_df['pb'].dropna().iloc[-1] if not pb_df['pb'].dropna().empty else None
+            current_price = pb_df['price'].dropna().iloc[-1] if 'price' in pb_df.columns and not pb_df['price'].dropna().empty else None
+            pb_ttm_avg = thresholds.get('pb_ttm_avg') if thresholds else None
+            
+            if pb_latest is not None and current_price is not None and pb_ttm_avg is not None and pb_ttm_avg != 0:
+                # Calculate fair price based on PB TTM Avg
+                fair_price = current_price * (pb_ttm_avg / pb_latest)
+                price_diff = ((fair_price - current_price) / current_price) * 100
+                
+                sum_cols = st.columns(4)
+                sum_cols[0].metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                sum_cols[1].metric("P/B hiện tại", f"{pb_latest:.2f}")
+                sum_cols[2].metric("PB TTM Avg", f"{pb_ttm_avg:.2f}")
+                sum_cols[3].metric("Giá hợp lý (PB TTM Avg)", f"{fair_price:,.0f} VND", delta=f"{price_diff:+.1f}%", delta_color="normal")
+            elif pb_latest is not None and current_price is not None:
+                sum_cols = st.columns(3)
+                sum_cols[0].metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                sum_cols[1].metric("P/B hiện tại", f"{pb_latest:.2f}")
+                if pb_ttm_avg is not None:
+                    sum_cols[2].metric("PB TTM Avg", f"{pb_ttm_avg:.2f}")
+                else:
+                    sum_cols[2].metric("PB TTM Avg", "N/A")
+
             with st.expander("Xem dữ liệu P/B chi tiết"):
                 st.dataframe(pb_df.rename(columns={'date': 'time'}), width='stretch')
                 st.download_button("Tải xuống P/B CSV", pb_df.to_csv(index=False), f"pb_{symbol}.csv", "text/csv")
@@ -2177,8 +2301,8 @@ elif main_menu == "Cổ phiếu":
                     val = thresholds.get(k)
                     if val is not None and not pd.isna(val):
                         try:
-                            # Add delta for PE TTM Avg
-                            if k == 'pe_ttm_avg' and pe_latest is not None:
+                            # Add delta for all metrics
+                            if pe_latest is not None:
                                 pe_diff = ((val - pe_latest) / pe_latest) * 100 if pe_latest != 0 else 0
                                 cols[i].metric(label, f"{float(val):.2f}", delta=f"{pe_diff:+.1f}%", delta_color="normal")
                             else:
@@ -2278,6 +2402,35 @@ elif main_menu == "Cổ phiếu":
                 )
             
             st.plotly_chart(fig_pe, use_container_width=True)
+
+            # Summary section for P/E
+            st.markdown("---")
+            st.subheader("📋 Tổng hợp P/E")
+            
+            # Get current values
+            pe_col = 'pe' if 'pe' in pe_df.columns else ('pe_ttm' if 'pe_ttm' in pe_df.columns else None)
+            pe_latest = pe_df[pe_col].dropna().iloc[-1] if pe_col and not pe_df[pe_col].dropna().empty else None
+            current_price = pe_df['price'].dropna().iloc[-1] if 'price' in pe_df.columns and not pe_df['price'].dropna().empty else None
+            pe_ttm_avg = thresholds.get('pe_ttm_avg') if thresholds else None
+            
+            if pe_latest is not None and current_price is not None and pe_ttm_avg is not None and pe_ttm_avg != 0:
+                # Calculate fair price based on PE TTM Avg
+                fair_price = current_price * (pe_ttm_avg / pe_latest)
+                price_diff = ((fair_price - current_price) / current_price) * 100
+                
+                sum_cols = st.columns(4)
+                sum_cols[0].metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                sum_cols[1].metric("P/E hiện tại", f"{pe_latest:.2f}")
+                sum_cols[2].metric("PE TTM Avg", f"{pe_ttm_avg:.2f}")
+                sum_cols[3].metric("Giá hợp lý (PE TTM Avg)", f"{fair_price:,.0f} VND", delta=f"{price_diff:+.1f}%", delta_color="normal")
+            elif pe_latest is not None and current_price is not None:
+                sum_cols = st.columns(3)
+                sum_cols[0].metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                sum_cols[1].metric("P/E hiện tại", f"{pe_latest:.2f}")
+                if pe_ttm_avg is not None:
+                    sum_cols[2].metric("PE TTM Avg", f"{pe_ttm_avg:.2f}")
+                else:
+                    sum_cols[2].metric("PE TTM Avg", "N/A")
 
             with st.expander("Xem dữ liệu P/E chi tiết"):
                 st.dataframe(pe_df.rename(columns={'date': 'time'}), use_container_width=True)
@@ -2651,7 +2804,7 @@ elif main_menu == "Cổ phiếu":
                             else:
                                 start_date, end_date = get_date_range(price_period)
                             
-                            # Get stock history data
+                            # Get stock history data (need at least 250 days for MA200)
                             price_df = get_stock_history(symbol_price, period="day", end_date=end_date.strftime('%Y-%m-%d'), count_back=365)
                             
                             if price_df is None or price_df.empty:
@@ -2661,6 +2814,9 @@ elif main_menu == "Cổ phiếu":
                                 price_df['time'] = pd.to_datetime(price_df['time'])
                                 price_df = price_df[(price_df['time'] >= pd.to_datetime(start_date)) & (price_df['time'] <= pd.to_datetime(end_date))]
                                 price_df = price_df.sort_values('time')
+                                
+                                # Calculate MA200 using pandas_ta
+                                price_df['ma200'] = ta.sma(price_df['close'], length=200)
                                 
                                 if price_df.empty:
                                     st.warning("Không có dữ liệu trong khoảng thời gian đã chọn.")
@@ -2718,6 +2874,16 @@ elif main_menu == "Cổ phiếu":
                                         fill='tozeroy',
                                         fillcolor='rgba(0, 191, 255, 0.1)',
                                     ))
+                                    
+                                    # Add MA200 line
+                                    if price_df['ma200'].notna().any():
+                                        fig_price.add_trace(go.Scatter(
+                                            x=price_df['time'],
+                                            y=price_df['ma200'],
+                                            mode='lines',
+                                            name='MA200',
+                                            line=dict(color='#FFD700', width=2, dash='solid'),
+                                        ))
                                     
                                     # Add mean line (analyst price target)
                                     if analyst_targets is not None and analyst_targets.get('mean') is not None:
@@ -3309,26 +3475,34 @@ elif main_menu == "Cổ phiếu":
                         
                         fig_stock_inv.update_layout(
                             title=dict(
-                                text=f'Phân loại Giao dịch - {current_symbol} ({current_start.strftime("%Y-%m-%d")} đến {current_end.strftime("%Y-%m-%d")})',
-                                y=0.95,
+                                text=f'💰 Phân loại Giao dịch - {current_symbol}',
+                                y=0.98,
                                 x=0.5,
                                 xanchor='center',
-                                yanchor='top'
+                                yanchor='top',
+                                font=dict(size=18)
                             ),
                             barmode='relative',
                             xaxis_title='Thời gian',
-                            yaxis_title='Giá trị giao dịch ròng',
+                            yaxis_title='Giá trị giao dịch ròng (tỷ đồng)',
                             yaxis2_title='Giá đóng cửa',
-                            height=550,
+                            height=500,
                             hovermode='x unified',
-                            showlegend=False,
-                            margin=dict(l=60, r=60, t=80, b=60),
-                            bargap=0.15,
+                            showlegend=True,
+                            legend=dict(
+                                orientation='h',
+                                yanchor='bottom',
+                                y=1.08,
+                                xanchor='center',
+                                x=0.5
+                            ),
+                            margin=dict(l=60, r=60, t=100, b=60),
+                            bargap=0.2,
                             bargroupgap=0.1
                         )
                         
                         fig_stock_inv.update_xaxes(showgrid=False, zeroline=False)
-                        fig_stock_inv.update_yaxes(showgrid=False, secondary_y=False)
+                        fig_stock_inv.update_yaxes(showgrid=True, gridcolor='rgba(128,128,128,0.2)', secondary_y=False)
                         fig_stock_inv.update_yaxes(showgrid=False, secondary_y=True)
                         
                         st.plotly_chart(fig_stock_inv, width='stretch')
@@ -3758,6 +3932,144 @@ elif main_menu == "Cổ phiếu":
     </style>
     """, unsafe_allow_html=True)
     
+elif main_menu == "Test":
+    st.header("🧪 Test API")
+    st.subheader("Kiểm tra kết nối API")
+    
+    # Default values
+    default_url = "https://valueinvesting.io/company/intrinsic_metric?ticker=SSI.VN"
+    default_headers = '''
+{
+  "accept": "*/*",
+  "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+  "content-type": "application/x-www-form-urlencoded",
+  "priority": "u=1, i",
+  "referer": "https://valueinvesting.io/HPG.VN/valuation/intrinsic-value",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
+'''
+    default_payload = "{}"
+    
+    # Input fields
+    api_url = st.text_input("URL", value=default_url, key="api_url")
+    
+    col_method, col_timeout = st.columns([1, 1])
+    with col_method:
+        api_method = st.selectbox("Method", ["GET", "POST"], index=0, key="api_method")
+    with col_timeout:
+        api_timeout = st.number_input("Timeout (giây)", min_value=5, max_value=120, value=30, key="api_timeout")
+    
+    api_headers = st.text_area("Headers (JSON)", value=default_headers, height=200, key="api_headers")
+    api_payload = st.text_area("Payload (JSON)", value=default_payload, height=100, key="api_payload")
+    
+    # Run button
+    if st.button("🚀 Chạy Test API", key="test_api_btn"):
+        with st.spinner("Đang kiểm tra API..."):
+            try:
+                import requests
+                import pandas as pd
+                
+                # Parse headers
+                try:
+                    try:
+                        headers = json.loads(api_headers)
+                    except json.JSONDecodeError:
+                        headers = eval(api_headers)
+                except Exception as e:
+                    st.error(f"❌ Headers không phải JSON/Python dict hợp lệ: {e}")
+                    st.stop()
+                
+                # Parse payload
+                try:
+                    try:
+                        payload = json.loads(api_payload)
+                    except json.JSONDecodeError:
+                        payload = eval(api_payload) if api_payload.strip() else {}
+                except Exception as e:
+                    st.error(f"❌ Payload không phải JSON hợp lệ: {e}")
+                    st.stop()
+                
+                st.info(f"Đang gọi API: {api_url}")
+                st.caption(f"Method: {api_method}, Timeout: {api_timeout}s")
+                
+                # Make request
+                if api_method == "GET":
+                    response = requests.get(api_url, headers=headers, data=payload, timeout=api_timeout)
+                else:
+                    response = requests.post(api_url, headers=headers, data=payload, timeout=api_timeout)
+                
+                st.divider()
+                
+                # Show response status
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                        
+                        # Check if data contains 'data' field (like valueinvesting.io API)
+                        if 'data' in data:
+                            df = pd.DataFrame(data['data'])
+                            st.success(f"✓ API hoạt động - HTTP {response.status_code}")
+                            st.write(f"**Số dòng dữ liệu:** {len(df)}")
+                            st.dataframe(df)
+                            
+                            with st.expander("Xem JSON đầy đủ"):
+                                st.json(data)
+                        else:
+                            st.success(f"✓ API hoạt động - HTTP {response.status_code}")
+                            st.json(data)
+                            
+                    except json.JSONDecodeError:
+                        st.success(f"✓ API hoạt động - HTTP {response.status_code}")
+                        st.warning("⚠ Response không phải JSON hợp lệ")
+                        st.text(response.text[:1000])
+                else:
+                    st.error(f"❌ API lỗi - HTTP {response.status_code}")
+                    st.text(response.text[:500])
+                    
+                # Show response headers
+                with st.expander("Xem Response Headers"):
+                    st.json(dict(response.headers))
+                    
+            except requests.exceptions.Timeout:
+                st.error(f"❌ Request timeout sau {api_timeout} giây")
+            except requests.exceptions.ConnectionError as e:
+                st.error(f"❌ Không thể kết nối đến server: {e}")
+            except Exception as e:
+                st.error(f"❌ Lỗi: {str(e)}")
+                import traceback
+                with st.expander("Xem chi tiết lỗi"):
+                    st.code(traceback.format_exc())
+    
+    # Info section
+    st.divider()
+    with st.expander("📝 Hướng dẫn sử dụng"):
+        st.markdown("""
+        **Cách sử dụng:**
+        1. Nhập URL của API cần test
+        2. Chọn method (GET hoặc POST)
+        3. Nhập headers dạng JSON **hoặc** Python dict (với dấu ')
+        4. Nhập payload dạng JSON hoặc Python dict (cho POST)
+        5. Nhấn nút "Chạy Test API"
+        
+        **Ví dụ headers (Python dict - dùng dấu '):**
+        ```python
+        {
+            'accept': '*/*',
+            'Cookie': 'token=abc123',
+            'user-agent': 'Mozilla/5.0'
+        }
+        ```
+        
+        **Ví dụ headers (JSON - dùng dấu "):**
+        ```json
+        {
+            "accept": "*/*",
+            "Cookie": "token=abc123"
+        }
+        ```
+        
+        **Lưu ý:** Cookie trong headers có thể hết hạn sau một thời gian.
+        """)
 
 # --- Polling for Rerun ---
 if "jobs" in st.session_state and st.session_state.jobs:
