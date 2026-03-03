@@ -3,6 +3,7 @@ import os
 import time
 import json
 import numpy as np
+import requests
 from concurrent.futures import ThreadPoolExecutor
 
 # Add the parent directory to the path to allow imports from modules
@@ -3935,77 +3936,140 @@ elif main_menu == "Test":
     st.header("🧪 Test API")
     st.subheader("Kiểm tra kết nối API")
     
-    # Input section - moved above the button
-    test_col3, test_col4 = st.columns([1, 2])
-    with test_col3:
-        test_symbol = st.text_input("Mã cổ phiếu", value="SSI", key="test_symbol")
-    with test_col4:
-        st.caption("Nhập mã cổ phiếu (ví dụ: SSI, HPG, VNM...)")
+    # Default values
+    default_url = "https://valueinvesting.io/company/intrinsic_metric?ticker=SSI.VN"
+    default_headers = '''
+{
+  "accept": "*/*",
+  "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+  "content-type": "application/x-www-form-urlencoded",
+  "priority": "u=1, i",
+  "referer": "https://valueinvesting.io/HPG.VN/valuation/intrinsic-value",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
+'''
+    default_payload = "{}"
     
-    test_col1, test_col2 = st.columns([1, 2])
-    with test_col1:
-        test_api_button = st.button("🚀 Chạy Test API", key="test_api_btn")
-    with test_col2:
-        if test_api_button:
-            with st.spinner("Đang kiểm tra API..."):
+    # Input fields
+    api_url = st.text_input("URL", value=default_url, key="api_url")
+    
+    col_method, col_timeout = st.columns([1, 1])
+    with col_method:
+        api_method = st.selectbox("Method", ["GET", "POST"], index=0, key="api_method")
+    with col_timeout:
+        api_timeout = st.number_input("Timeout (giây)", min_value=5, max_value=120, value=30, key="api_timeout")
+    
+    api_headers = st.text_area("Headers (JSON)", value=default_headers, height=200, key="api_headers")
+    api_payload = st.text_area("Payload (JSON)", value=default_payload, height=100, key="api_payload")
+    
+    # Run button
+    if st.button("🚀 Chạy Test API", key="test_api_btn"):
+        with st.spinner("Đang kiểm tra API..."):
+            try:
+                import requests
+                import pandas as pd
+                
+                # Parse headers
                 try:
-                    import requests
-                    import pandas as pd
-                    
-                    symbol = st.session_state.test_symbol if st.session_state.test_symbol else "SSI"
-                    url = f"https://valueinvesting.io/company/intrinsic_metric?ticker={symbol}.VN"
-                    
-                    payload = {}
-                    headers = {
-                        'accept': '*/*',
-                        'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
-                        'content-type': 'application/x-www-form-urlencoded',
-                        'priority': 'u=1, i',
-                        'referer': 'https://valueinvesting.io/HPG.VN/valuation/intrinsic-value',
-                        'sec-ch-ua': '"Opera GX";v="127", "Chromium";v="143", "Not A(Brand";v="24"',
-                        'sec-ch-ua-arch': '"x86"',
-                        'sec-ch-ua-bitness': '"64"',
-                        'sec-ch-ua-full-version': '"127.0.5778.75"',
-                        'sec-ch-ua-full-version-list': '"Opera GX";v="127.0.5778.75", "Chromium";v="143.0.7499.194", "Not A(Brand";v="24.0.0.0"',
-                        'sec-ch-ua-mobile': '?0',
-                        'sec-ch-ua-model': '""',
-                        'sec-ch-ua-platform': '"Windows"',
-                        'sec-ch-ua-platform-version': '"10.0.0"',
-                        'sec-fetch-dest': 'empty',
-                        'sec-fetch-mode': 'cors',
-                        'sec-fetch-site': 'same-origin',
-                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
-                        'Cookie': 'beegosessionID=c8d83cd290a878b2ef8edd8948f9667c; cf_clearance=aHgdqJ9DYvPpXFxZJi0vdiZglkvWjN9ivXJt3ZV49ME-1772535795-1.2.1.1-UySGf.5p_WYS6107qYFn5PWfppro9DkJ8uIKHqIqVqjy7lbiJLdsJRK7o1ExAd4lJH8qVSXbPVgBwkcz_VjfSdDrpJIDHcNz6TgM9GuO2cC4xEwbBcaRbjLVH6hzJarEIVNQuHts54q6uK38uKZY949QcVpPJc0b4h__YILNRultG8c1sTAbZDPDf9ud3aG7NN7i_pCOuUZV5skMtbyzBxWvLl8.jB6caY5XhEDgtx0; essay=eEXPcXslkD; _ga=GA1.1.2012916349.1772535797; twk_idm_key=m3rv0sT3N-Z878nry1I_8; TawkConnectionTime=0; twk_uuid_611c4284d6e7610a49b0ad9d=%7B%22uuid%22%3A%221.92R2xxtoQpimRheYQeUvZHdi6ymGX7CtAyweqbdOBtfXIbFEGHMcDDCQcEJIrsQRAqLq77c2yZijQgeKfqUvOjUGtDt4A0gJC3sNCEqLTzJSyzc8EfC2swVrPv10%22%2C%22version%22%3A3%2C%22domain%22%3A%22valueinvesting.io%22%2C%22ts%22%3A1772535801947%7D; token=d6jc01jaiij57r13levg; email=huunhon5597@gmail.com; _ga_4KHY6KT2C0=GS2.1.s1772535796$o1$g1$t1772536202$j27$l0$h0; email=huunhon5597@gmail.com'
-                    }
-                    
-                    st.info(f"Đang gọi API: {url}")
-                    response = requests.request("GET", url, headers=headers, timeout=30)
-                    
-                    if response.status_code == 200:
-                        try:
-                            data = response.json()
-                            if 'data' in data:
-                                df = pd.DataFrame(data['data'])
-                                st.success(f"✓ API hoạt động - Lấy được {len(df)} dòng dữ liệu cho {symbol}")
-                                st.dataframe(df)
-                                st.json(data)
-                            else:
-                                st.warning("⚠ API trả về dữ liệu nhưng không có trường 'data'")
-                                st.json(data)
-                        except json.JSONDecodeError:
-                            st.error("⚠ API trả về dữ liệu không phải JSON hợp lệ")
-                            st.text(response.text[:500])
-                    else:
-                        st.error(f"❌ API trả về mã lỗi: {response.status_code}")
-                        st.text(response.text[:500])
-                        
+                    try:
+                        headers = json.loads(api_headers)
+                    except json.JSONDecodeError:
+                        headers = eval(api_headers)
                 except Exception as e:
-                    st.error(f"❌ Lỗi khi gọi API: {str(e)}")
-                    import traceback
-                    with st.expander("Xem chi tiết lỗi"):
-                        st.code(traceback.format_exc())
-        else:
-            st.info("Nhấn nút 'Chạy Test API' để kiểm tra kết nối API.")
+                    st.error(f"❌ Headers không phải JSON/Python dict hợp lệ: {e}")
+                    st.stop()
+                
+                # Parse payload
+                try:
+                    try:
+                        payload = json.loads(api_payload)
+                    except json.JSONDecodeError:
+                        payload = eval(api_payload) if api_payload.strip() else {}
+                except Exception as e:
+                    st.error(f"❌ Payload không phải JSON hợp lệ: {e}")
+                    st.stop()
+                
+                st.info(f"Đang gọi API: {api_url}")
+                st.caption(f"Method: {api_method}, Timeout: {api_timeout}s")
+                
+                # Make request
+                if api_method == "GET":
+                    response = requests.get(api_url, headers=headers, data=payload, timeout=api_timeout)
+                else:
+                    response = requests.post(api_url, headers=headers, data=payload, timeout=api_timeout)
+                
+                st.divider()
+                
+                # Show response status
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                        
+                        # Check if data contains 'data' field (like valueinvesting.io API)
+                        if 'data' in data:
+                            df = pd.DataFrame(data['data'])
+                            st.success(f"✓ API hoạt động - HTTP {response.status_code}")
+                            st.write(f"**Số dòng dữ liệu:** {len(df)}")
+                            st.dataframe(df)
+                            
+                            with st.expander("Xem JSON đầy đủ"):
+                                st.json(data)
+                        else:
+                            st.success(f"✓ API hoạt động - HTTP {response.status_code}")
+                            st.json(data)
+                            
+                    except json.JSONDecodeError:
+                        st.success(f"✓ API hoạt động - HTTP {response.status_code}")
+                        st.warning("⚠ Response không phải JSON hợp lệ")
+                        st.text(response.text[:1000])
+                else:
+                    st.error(f"❌ API lỗi - HTTP {response.status_code}")
+                    st.text(response.text[:500])
+                    
+                # Show response headers
+                with st.expander("Xem Response Headers"):
+                    st.json(dict(response.headers))
+                    
+            except requests.exceptions.Timeout:
+                st.error(f"❌ Request timeout sau {api_timeout} giây")
+            except requests.exceptions.ConnectionError as e:
+                st.error(f"❌ Không thể kết nối đến server: {e}")
+            except Exception as e:
+                st.error(f"❌ Lỗi: {str(e)}")
+                import traceback
+                with st.expander("Xem chi tiết lỗi"):
+                    st.code(traceback.format_exc())
+    
+    # Info section
+    st.divider()
+    with st.expander("📝 Hướng dẫn sử dụng"):
+        st.markdown("""
+        **Cách sử dụng:**
+        1. Nhập URL của API cần test
+        2. Chọn method (GET hoặc POST)
+        3. Nhập headers dạng JSON **hoặc** Python dict (với dấu ')
+        4. Nhập payload dạng JSON hoặc Python dict (cho POST)
+        5. Nhấn nút "Chạy Test API"
+        
+        **Ví dụ headers (Python dict - dùng dấu '):**
+        ```python
+        {
+            'accept': '*/*',
+            'Cookie': 'token=abc123',
+            'user-agent': 'Mozilla/5.0'
+        }
+        ```
+        
+        **Ví dụ headers (JSON - dùng dấu "):**
+        ```json
+        {
+            "accept": "*/*",
+            "Cookie": "token=abc123"
+        }
+        ```
+        
+        **Lưu ý:** Cookie trong headers có thể hết hạn sau một thời gian.
+        """)
 
 # --- Polling for Rerun ---
 if "jobs" in st.session_state and st.session_state.jobs:
