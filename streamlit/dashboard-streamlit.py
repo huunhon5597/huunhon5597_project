@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import json
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
@@ -762,7 +763,7 @@ if "prev_main_menu" not in st.session_state:
 
 main_menu = st.sidebar.selectbox(
     "Menu chính", 
-    ["Trang chủ", "Thị trường", "Cổ phiếu"], 
+    ["Trang chủ", "Thị trường", "Cổ phiếu", "Test"], 
     index=0, 
     key="main_menu",
     on_change=clear_content_on_menu_change
@@ -3930,6 +3931,81 @@ elif main_menu == "Cổ phiếu":
     </style>
     """, unsafe_allow_html=True)
     
+elif main_menu == "Test":
+    st.header("🧪 Test API")
+    st.subheader("Kiểm tra kết nối API")
+    
+    # Input section - moved above the button
+    test_col3, test_col4 = st.columns([1, 2])
+    with test_col3:
+        test_symbol = st.text_input("Mã cổ phiếu", value="SSI", key="test_symbol")
+    with test_col4:
+        st.caption("Nhập mã cổ phiếu (ví dụ: SSI, HPG, VNM...)")
+    
+    test_col1, test_col2 = st.columns([1, 2])
+    with test_col1:
+        test_api_button = st.button("🚀 Chạy Test API", key="test_api_btn")
+    with test_col2:
+        if test_api_button:
+            with st.spinner("Đang kiểm tra API..."):
+                try:
+                    import requests
+                    import pandas as pd
+                    
+                    symbol = st.session_state.test_symbol if st.session_state.test_symbol else "SSI"
+                    url = f"https://valueinvesting.io/company/intrinsic_metric?ticker={symbol}.VN"
+                    
+                    payload = {}
+                    headers = {
+                        'accept': '*/*',
+                        'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
+                        'content-type': 'application/x-www-form-urlencoded',
+                        'priority': 'u=1, i',
+                        'referer': 'https://valueinvesting.io/HPG.VN/valuation/intrinsic-value',
+                        'sec-ch-ua': '"Opera GX";v="127", "Chromium";v="143", "Not A(Brand";v="24"',
+                        'sec-ch-ua-arch': '"x86"',
+                        'sec-ch-ua-bitness': '"64"',
+                        'sec-ch-ua-full-version': '"127.0.5778.75"',
+                        'sec-ch-ua-full-version-list': '"Opera GX";v="127.0.5778.75", "Chromium";v="143.0.7499.194", "Not A(Brand";v="24.0.0.0"',
+                        'sec-ch-ua-mobile': '?0',
+                        'sec-ch-ua-model': '""',
+                        'sec-ch-ua-platform': '"Windows"',
+                        'sec-ch-ua-platform-version': '"10.0.0"',
+                        'sec-fetch-dest': 'empty',
+                        'sec-fetch-mode': 'cors',
+                        'sec-fetch-site': 'same-origin',
+                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
+                        'Cookie': 'beegosessionID=c8d83cd290a878b2ef8edd8948f9667c; cf_clearance=aHgdqJ9DYvPpXFxZJi0vdiZglkvWjN9ivXJt3ZV49ME-1772535795-1.2.1.1-UySGf.5p_WYS6107qYFn5PWfppro9DkJ8uIKHqIqVqjy7lbiJLdsJRK7o1ExAd4lJH8qVSXbPVgBwkcz_VjfSdDrpJIDHcNz6TgM9GuO2cC4xEwbBcaRbjLVH6hzJarEIVNQuHts54q6uK38uKZY949QcVpPJc0b4h__YILNRultG8c1sTAbZDPDf9ud3aG7NN7i_pCOuUZV5skMtbyzBxWvLl8.jB6caY5XhEDgtx0; essay=eEXPcXslkD; _ga=GA1.1.2012916349.1772535797; twk_idm_key=m3rv0sT3N-Z878nry1I_8; TawkConnectionTime=0; twk_uuid_611c4284d6e7610a49b0ad9d=%7B%22uuid%22%3A%221.92R2xxtoQpimRheYQeUvZHdi6ymGX7CtAyweqbdOBtfXIbFEGHMcDDCQcEJIrsQRAqLq77c2yZijQgeKfqUvOjUGtDt4A0gJC3sNCEqLTzJSyzc8EfC2swVrPv10%22%2C%22version%22%3A3%2C%22domain%22%3A%22valueinvesting.io%22%2C%22ts%22%3A1772535801947%7D; token=d6jc01jaiij57r13levg; email=huunhon5597@gmail.com; _ga_4KHY6KT2C0=GS2.1.s1772535796$o1$g1$t1772536202$j27$l0$h0; email=huunhon5597@gmail.com'
+                    }
+                    
+                    st.info(f"Đang gọi API: {url}")
+                    response = requests.request("GET", url, headers=headers, timeout=30)
+                    
+                    if response.status_code == 200:
+                        try:
+                            data = response.json()
+                            if 'data' in data:
+                                df = pd.DataFrame(data['data'])
+                                st.success(f"✓ API hoạt động - Lấy được {len(df)} dòng dữ liệu cho {symbol}")
+                                st.dataframe(df)
+                                st.json(data)
+                            else:
+                                st.warning("⚠ API trả về dữ liệu nhưng không có trường 'data'")
+                                st.json(data)
+                        except json.JSONDecodeError:
+                            st.error("⚠ API trả về dữ liệu không phải JSON hợp lệ")
+                            st.text(response.text[:500])
+                    else:
+                        st.error(f"❌ API trả về mã lỗi: {response.status_code}")
+                        st.text(response.text[:500])
+                        
+                except Exception as e:
+                    st.error(f"❌ Lỗi khi gọi API: {str(e)}")
+                    import traceback
+                    with st.expander("Xem chi tiết lỗi"):
+                        st.code(traceback.format_exc())
+        else:
+            st.info("Nhấn nút 'Chạy Test API' để kiểm tra kết nối API.")
 
 # --- Polling for Rerun ---
 if "jobs" in st.session_state and st.session_state.jobs:
