@@ -425,7 +425,7 @@ def fireant_valuation(symbol):
 
 def analyst_price_targets(symbol):
     """
-    Fetch analyst price targets for a Vietnamese stock using yfinance.
+    Fetch analyst price targets for a Vietnamese stock using valueinvesting.io API.
     
     Args:
         symbol (str): Stock symbol (e.g., 'HPG', 'VNM', 'FPT')
@@ -438,51 +438,83 @@ def analyst_price_targets(symbol):
             - median: Median price target
             Or None if failed
     """
+    url = f"https://valueinvesting.io/company/estimates?limit=12&symbol={symbol}.VN"
+    
+    payload = json.dumps({
+        "conditions": "[]",
+        "mode": "watchlist",
+        "existing_columns": "[]",
+        "screener_currency": "",
+        "latest_tracking_code": "1",
+        "metrics_to_queries": "[\"256\",\"258\",\"260\",\"262\",\"146\",\"146\",\"146\",\"146\",\"146\",\"146\",\"103\",\"103\",\"103\",\"103\",\"103\",\"103\",\"233\",\"233\",\"233\",\"233\",\"233\",\"232\",\"232\",\"232\",\"232\",\"232\",\"237\",\"237\",\"237\",\"237\",\"237\",\"234\",\"234\",\"234\",\"234\",\"234\",\"235\",\"235\",\"235\",\"235\",\"235\",\"238\",\"238\",\"238\",\"238\",\"238\",\"239\",\"239\",\"239\",\"239\",\"239\",\"12\",\"168\",\"299\",\"206\"]",
+        "metrics_to_queries_period": "[\"-1\",\"-1\",\"-1\",\"-1\",\"0\",\"FY-1\",\"FY-2\",\"FY-3\",\"FY-4\",\"FY-5\",\"0\",\"FY-1\",\"FY-2\",\"FY-3\",\"FY-4\",\"FY-5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"-1\",\"-1\",\"-1\",\"-1\"]",
+        "metrics_to_queries_currency_type": "[\"2\",\"2\",\"2\",\"2\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"0\",\"0\",\"0\",\"0\",\"0\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"0\",\"0\",\"0\",\"2\"]",
+        "filter_default_freq": "[]",
+        "filter_metrics": "[]",
+        "filter_currency_type": "[]",
+        "metrics_financials_grouping": "[\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\"]",
+        "metrics_which_latest_days": "[\"None\",\"None\",\"None\",\"None\",\"None\",\"FY\",\"FY\",\"FY\",\"FY\",\"FY\",\"None\",\"FY\",\"FY\",\"FY\",\"FY\",\"FY\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"None\",\"None\",\"None\",\"None\"]",
+        "name_of_considered_screener": "",
+        "ticker_str": "(('" + symbol + "', 'VN'))",
+        "original_filters": "[]",
+        "original_columns": "[{\"field_code\":\"256\"},{\"field_code\":\"258\"},{\"field_code\":\"260\"},{\"field_code\":\"262\"},{\"field_code\":\"146\",\"period\":\"FY@6\"},{\"field_code\":\"103\",\"period\":\"FY@6\"},{\"field_code\":\"233\",\"period\":\"FY+1\"},{\"field_code\":\"233\",\"period\":\"FY+2\"},{\"field_code\":\"233\",\"period\":\"FY+3\"},{\"field_code\":\"233\",\"period\":\"FY+4\"},{\"field_code\":\"233\",\"period\":\"FY+5\"},{\"field_code\":\"232\",\"period\":\"FY+1\"},{\"field_code\":\"232\",\"period\":\"FY+2\"},{\"field_code\":\"232\",\"period\":\"FY+3\"},{\"field_code\":\"232\",\"period\":\"FY+4\"},{\"field_code\":\"232\",\"period\":\"FY+5\"},{\"field_code\":\"237\",\"period\":\"FY+1\"},{\"field_code\":\"237\",\"period\":\"FY+2\"},{\"field_code\":\"237\",\"period\":\"FY+3\"},{\"field_code\":\"237\",\"period\":\"FY+4\"},{\"field_code\":\"237\",\"period\":\"FY+5\"},{\"field_code\":\"234\",\"period\":\"FY+1\"},{\"field_code\":\"234\",\"period\":\"FY+2\"},{\"field_code\":\"234\",\"period\":\"FY+3\"},{\"field_code\":\"234\",\"period\":\"FY+4\"},{\"field_code\":\"234\",\"period\":\"FY+5\"},{\"field_code\":\"235\",\"period\":\"FY+1\"},{\"field_code\":\"235\",\"period\":\"FY+2\"},{\"field_code\":\"235\",\"period\":\"FY+3\"},{\"field_code\":\"235\",\"period\":\"FY+4\"},{\"field_code\":\"235\",\"period\":\"FY+5\"},{\"field_code\":\"238\",\"period\":\"FY+1\"},{\"field_code\":\"238\",\"period\":\"FY+2\"},{\"field_code\":\"238\",\"period\":\"FY+3\"},{\"field_code\":\"238\",\"period\":\"FY+4\"},{\"field_code\":\"238\",\"period\":\"FY+5\"},{\"field_code\":\"239\",\"period\":\"FY+1\"},{\"field_code\":\"239\",\"period\":\"FY+2\"},{\"field_code\":\"239\",\"period\":\"FY+3\"},{\"field_code\":\"239\",\"period\":\"FY+4\"},{\"field_code\":\"239\",\"period\":\"FY+5\"},{\"field_code\":\"12\"},{\"field_code\":\"168\"},{\"field_code\":\"299\"},{\"field_code\":\"206\"}]",
+        "original_currency": "[\"\",\"\"]",
+        "count_arr": "[]"
+    })
+    
+    headers = {
+        'accept': 'application/json',
+        'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
+        'content-type': 'application/json',
+        'origin': 'https://valueinvesting.io',
+        'priority': 'u=1, i',
+        'sec-ch-ua': '"Opera GX";v="127", "Chromium";v="143", "Not A(Brand";v="24"',
+        'sec-ch-ua-arch': '"x86"',
+        'sec-ch-ua-bitness': '"64"',
+        'sec-ch-ua-full-version': '"127.0.5778.75"',
+        'sec-ch-ua-full-version-list': '"Opera GX";v="127.0.5778.75", "Chromium";v="143.0.7499.194", "Not A(Brand";v="24.0.0.0"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-model': '""',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-ch-ua-platform-version': '"10.0.0"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
+        'Cookie': 'beegosessionID=c8d83cd290a878b2ef8edd8948f9667c; cf_clearance=aHgdqJ9DYvPpXFxZJi0vdiZglkvWjN9ivXJt3ZV49ME-1772535795-1.2.1.1-UySGf.5p_WYS6107qYFn5PWfppro9DkJ8uIKHqIqVqjy7lbiJLdsJRK7o1ExAd4lJH8qVSXbPVgBwkcz_VjfSdDrpJIDHcNz6TgM9GuO2cC4xEwbBcaRbjLVH6hzJarEIVNQuHts54q6uK38uKZY949QcVpPJc0b4h__YILNRultG8c1sTAbZDPDf9ud3aG7NN7i_pCOuUZV5skMtbyzBxWvLl8.jB6caY5XhEDgtx0; essay=eEXPcXslkD; _ga=GA1.1.2012916349.1772535797; twk_idm_key=m3rv0sT3N-Z878nry1I_8; TawkConnectionTime=0; twk_uuid_611c4284d6e7610a49b0ad9d=%7B%22uuid%22%3A%221.92R2xxtoQpimRheYQeUvZHdi6ymGX7CtAyweqbdOBtfXIbFEGHMcDDCQcEJIrsQRAqLq77c2yZijQgeKfqUvOjUGtDt4A0gJC3sNCEqLTzJSyzc8EfC2swVrPv10%22%2C%22version%22%3A3%2C%22domain%22%3A%22valueinvesting.io%22%2C%22ts%22%3A1772535801947%7D; token=d6jc01jaiij57r13levg; email=huunhon5597@gmail.com; _ga_4KHY6KT2C0=GS2.1.s1772535796$o1$g1$t1772537684$j6$l0$h0; email=huunhon5597@gmail.com'
+    }
+    
     try:
-        ticker = yf.Ticker(f"{symbol}.VN")
-        price_targets = ticker.analyst_price_targets
+        session = _get_session()
+        response = session.post(url, headers=headers, data=payload, timeout=15)
         
-        # Handle case where price_targets is a dict
-        if isinstance(price_targets, dict):
-            if not price_targets:
-                print(f"No analyst price targets available for {symbol}")
-                return None
-            
-            result = {}
-            result['high'] = float(price_targets.get('high', 0)) if price_targets.get('high') is not None else None
-            result['low'] = float(price_targets.get('low', 0)) if price_targets.get('low') is not None else None
-            result['mean'] = float(price_targets.get('mean', 0)) if price_targets.get('mean') is not None else None
-            result['median'] = float(price_targets.get('median', 0)) if price_targets.get('median') is not None else None
-            
-            return result
-        
-        # Handle case where price_targets is a DataFrame
-        if price_targets is None or (hasattr(price_targets, 'empty') and price_targets.empty):
-            print(f"No analyst price targets available for {symbol}")
+        if response.status_code != 200:
+            print(f"valueinvesting.io API returned status {response.status_code}")
             return None
         
-        # Extract the values from DataFrame
-        result = {}
+        response_data = response.json()
         
-        if 'high' in price_targets.columns:
-            result['high'] = float(price_targets['high'].iloc[0]) if not price_targets['high'].empty else None
-        else:
-            result['high'] = None
-            
-        if 'low' in price_targets.columns:
-            result['low'] = float(price_targets['low'].iloc[0]) if not price_targets['low'].empty else None
-        else:
-            result['low'] = None
-            
-        if 'mean' in price_targets.columns:
-            result['mean'] = float(price_targets['mean'].iloc[0]) if not price_targets['mean'].empty else None
-        else:
-            result['mean'] = None
-            
-        if 'median' in price_targets.columns:
-            result['median'] = float(price_targets['median'].iloc[0]) if not price_targets['median'].empty else None
-        else:
-            result['median'] = None
+        if 'from_ar' not in response_data or 'main' not in response_data['from_ar']:
+            print(f"Invalid response structure for {symbol}")
+            return None
+        
+        response = response_data['from_ar']['main']
+        df = pd.DataFrame(response)
+        df = df.transpose()
+        
+        # Extract price target values
+        # 256 = high, 258 = low, 260 = mean, 262 = median
+        price_target_high = df['256_-1'].iloc[0] if '256_-1' in df.columns and not df['256_-1'].empty else None
+        price_target_low = df['258_-1'].iloc[0] if '258_-1' in df.columns and not df['258_-1'].empty else None
+        price_target_mean = df['260_-1'].iloc[0] if '260_-1' in df.columns and not df['260_-1'].empty else None
+        price_target_median = df['262_-1'].iloc[0] if '262_-1' in df.columns and not df['262_-1'].empty else None
+        
+        result = {
+            'high': float(price_target_high) if price_target_high is not None and not pd.isna(price_target_high) else None,
+            'low': float(price_target_low) if price_target_low is not None and not pd.isna(price_target_low) else None,
+            'mean': float(price_target_mean) if price_target_mean is not None and not pd.isna(price_target_mean) else None,
+            'median': float(price_target_median) if price_target_median is not None and not pd.isna(price_target_median) else None
+        }
         
         return result
         
