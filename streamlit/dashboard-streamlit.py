@@ -2625,6 +2625,11 @@ elif main_menu == "Cổ phiếu":
                                         peg_value = float(peg_data['peg_ratio']) if peg_data['peg_ratio'] is not None else None
                                         pe_ratio = float(peg_data['pe_ratio']) if peg_data['pe_ratio'] is not None else None
                                         eps_growth = float(peg_data['eps_growth']) if peg_data['eps_growth'] is not None else None
+                                        
+                                        # Get data source if available
+                                        data_source = peg_data.get('data_source', None)
+                                        if data_source:
+                                            st.caption(f"📊 Nguồn dữ liệu EPS: **{data_source}**")
 
                                         # Validate data values
                                         if peg_value is None:
@@ -2725,7 +2730,7 @@ elif main_menu == "Cổ phiếu":
                                 eps_current = peg_data.get('eps_current')
                                 eps_forward = peg_data.get('eps_forward')
                                 if eps_current is not None and eps_forward is not None:
-                                    data_col3.metric("EPS hiện tại / dự phóng", f"{float(eps_current):.0f} / {float(eps_forward):.0f}")
+                                    data_col3.metric("EPS hiện tại / dự phóng", f"{float(eps_current):,.0f} / {float(eps_forward):,.0f}")
                                 else:
                                     data_col3.metric("Nguồn dữ liệu", "Vietcap")
                                 

@@ -218,7 +218,7 @@ def ref_pb_pe(symbol, start_date=None, end_date=None):
 def get_peg(symbol):
     """
     Calculate PEG ratio (Price/Earnings to Growth) for a given stock symbol.
-    Uses Vietcap API (iq.vietcap.com.vn) to get EPS growth for PEG calculation.
+    Uses valueinvesting.io API first for EPS data, falls back to FiinTrade if needed.
     
     Args:
         symbol (str): Stock symbol
@@ -229,7 +229,8 @@ def get_peg(symbol):
             - pe_ratio: Current P/E (TTM)
             - eps_current: Current EPS (TTM)
             - eps_forward: Forward EPS
-            - eps_growth: EPS growth rate (%)
+            - eps_growth: Average EPS growth rate (%)
+            - data_source: Source of EPS data ('valueinvesting.io' or 'fiintrade')
             - note: Status message
     """
     print(f"Calculating PEG for {symbol}")
@@ -252,31 +253,142 @@ def get_peg(symbol):
             print(f"Giá trị P/E không hợp lệ cho {symbol}")
             return None
         
-        # Get EPS from FiinTrade API (no token required)
-        url = f"https://wl-fundamental.fiintrade.vn/Snapshot/GetSnapshot?language=vi&OrganCode={symbol}"
+        # Try valueinvesting.io first
+        eps_data = _get_eps_from_valueinvesting(symbol)
+        
+        # If valueinvesting.io has valid data, use it
+        if eps_data is not None and eps_data.get('eps_current') is not None and eps_data.get('eps_growth') is not None:
+            peg_ratio = None
+            note = ''
+            
+            if eps_data['eps_growth'] > 0:
+                peg_ratio = pe / eps_data['eps_growth']
+                note = 'PEG calculated successfully (valueinvesting.io)'
+            elif eps_data['eps_growth'] <= 0:
+                note = f'EPS growth âm ({eps_data["eps_growth"]:.2f}%) - Không có ý nghĩa tính PEG (valueinvesting.io)'
+            
+            return {
+                'peg_ratio': peg_ratio,
+                'pe_ratio': pe,
+                'eps_current': eps_data['eps_current'],
+                'eps_forward': eps_data['eps_forward'],
+                'eps_growth': eps_data['eps_growth'],
+                'data_source': 'valueinvesting.io',
+                'note': note
+            }
+        
+        # Fallback to FiinTrade if valueinvesting.io has no valid data
+        print(f"valueinvesting.io không có dữ liệu EPS, sử dụng FiinTrade...")
+        eps_data = _get_eps_from_fiintrade(symbol)
+        
+        if eps_data is None:
+            return {
+                'peg_ratio': None,
+                'pe_ratio': pe,
+                'eps_current': None,
+                'eps_forward': None,
+                'eps_growth': None,
+                'data_source': None,
+                'note': 'No EPS data available from any source'
+            }
+        
+        peg_ratio = None
+        note = ''
+        
+        if eps_data['eps_growth'] is not None and eps_data['eps_growth'] > 0:
+            peg_ratio = pe / eps_data['eps_growth']
+            note = 'PEG calculated successfully (FiinTrade)'
+        elif eps_data['eps_growth'] is not None and eps_data['eps_growth'] <= 0:
+            note = f'EPS growth âm ({eps_data["eps_growth"]:.2f}%) - Không có ý nghĩa tính PEG (FiinTrade)'
+        else:
+            note = 'Không đủ dữ liệu để tính EPS growth (FiinTrade)'
+        
+        return {
+            'peg_ratio': peg_ratio,
+            'pe_ratio': pe,
+            'eps_current': eps_data['eps_current'],
+            'eps_forward': eps_data['eps_forward'],
+            'eps_growth': eps_data['eps_growth'],
+            'data_source': 'fiintrade',
+            'note': note
+        }
+
+    except Exception as e:
+        print(f"Có lỗi xảy ra trong hàm get_peg: {e}")
+        return None
+    
+    try:
+        # Get P/E from FiinTrade API
+        df_pe = get_pb_pe(symbol)
+        if df_pe is None or df_pe.empty:
+            print(f"Dữ liệu P/E trống cho {symbol}")
+            return None
+            
+        # Get the last valid P/E value
+        pe_values = df_pe['pe'].dropna()
+        if pe_values.empty:
+            print(f"Không có giá trị P/E hợp lệ cho {symbol}")
+            return None
+            
+        pe = pe_values.iloc[-1]
+        if pd.isna(pe) or pe <= 0:
+            print(f"Giá trị P/E không hợp lệ cho {symbol}")
+            return None
+        
+        # Get EPS from valueinvesting.io API
+        url = f"https://valueinvesting.io/company/estimates?limit=12&symbol={symbol}.VN"
+        
+        payload = json.dumps({
+            "conditions": "[]",
+            "mode": "watchlist",
+            "existing_columns": "[]",
+            "screener_currency": "",
+            "latest_tracking_code": "1",
+            "metrics_to_queries": "[\"256\",\"258\",\"260\",\"262\",\"146\",\"146\",\"146\",\"146\",\"146\",\"146\",\"103\",\"103\",\"103\",\"103\",\"103\",\"103\",\"233\",\"233\",\"233\",\"233\",\"233\",\"232\",\"232\",\"232\",\"232\",\"232\",\"237\",\"237\",\"237\",\"237\",\"237\",\"234\",\"234\",\"234\",\"234\",\"234\",\"235\",\"235\",\"235\",\"235\",\"235\",\"238\",\"238\",\"238\",\"238\",\"238\",\"239\",\"239\",\"239\",\"239\",\"239\",\"12\",\"168\",\"299\",\"206\"]",
+            "metrics_to_queries_period": "[\"-1\",\"-1\",\"-1\",\"-1\",\"0\",\"FY-1\",\"FY-2\",\"FY-3\",\"FY-4\",\"FY-5\",\"0\",\"FY-1\",\"FY-2\",\"FY-3\",\"FY-4\",\"FY-5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"-1\",\"-1\",\"-1\",\"-1\"]",
+            "metrics_to_queries_currency_type": "[\"2\",\"2\",\"2\",\"2\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"0\",\"0\",\"0\",\"0\",\"0\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"0\",\"0\",\"0\",\"2\"]",
+            "filter_default_freq": "[]",
+            "filter_metrics": "[]",
+            "filter_currency_type": "[]",
+            "metrics_financials_grouping": "[\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\"]",
+            "metrics_which_latest_days": "[\"None\",\"None\",\"None\",\"None\",\"None\",\"FY\",\"FY\",\"FY\",\"FY\",\"FY\",\"None\",\"FY\",\"FY\",\"FY\",\"FY\",\"FY\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"None\",\"None\",\"None\",\"None\"]",
+            "name_of_considered_screener": "",
+            "ticker_str": "(('" + symbol + "', 'VN'))",
+            "original_filters": "[]",
+            "original_columns": "[{\"field_code\":\"256\"},{\"field_code\":\"258\"},{\"field_code\":\"260\"},{\"field_code\":\"262\"},{\"field_code\":\"146\",\"period\":\"FY@6\"},{\"field_code\":\"103\",\"period\":\"FY@6\"},{\"field_code\":\"233\",\"period\":\"FY+1\"},{\"field_code\":\"233\",\"period\":\"FY+2\"},{\"field_code\":\"233\",\"period\":\"FY+3\"},{\"field_code\":\"233\",\"period\":\"FY+4\"},{\"field_code\":\"233\",\"period\":\"FY+5\"},{\"field_code\":\"232\",\"period\":\"FY+1\"},{\"field_code\":\"232\",\"period\":\"FY+2\"},{\"field_code\":\"232\",\"period\":\"FY+3\"},{\"field_code\":\"232\",\"period\":\"FY+4\"},{\"field_code\":\"232\",\"period\":\"FY+5\"},{\"field_code\":\"237\",\"period\":\"FY+1\"},{\"field_code\":\"237\",\"period\":\"FY+2\"},{\"field_code\":\"237\",\"period\":\"FY+3\"},{\"field_code\":\"237\",\"period\":\"FY+4\"},{\"field_code\":\"237\",\"period\":\"FY+5\"},{\"field_code\":\"234\",\"period\":\"FY+1\"},{\"field_code\":\"234\",\"period\":\"FY+2\"},{\"field_code\":\"234\",\"period\":\"FY+3\"},{\"field_code\":\"234\",\"period\":\"FY+4\"},{\"field_code\":\"234\",\"period\":\"FY+5\"},{\"field_code\":\"235\",\"period\":\"FY+1\"},{\"field_code\":\"235\",\"period\":\"FY+2\"},{\"field_code\":\"235\",\"period\":\"FY+3\"},{\"field_code\":\"235\",\"period\":\"FY+4\"},{\"field_code\":\"235\",\"period\":\"FY+5\"},{\"field_code\":\"238\",\"period\":\"FY+1\"},{\"field_code\":\"238\",\"period\":\"FY+2\"},{\"field_code\":\"238\",\"period\":\"FY+3\"},{\"field_code\":\"238\",\"period\":\"FY+4\"},{\"field_code\":\"238\",\"period\":\"FY+5\"},{\"field_code\":\"239\",\"period\":\"FY+1\"},{\"field_code\":\"239\",\"period\":\"FY+2\"},{\"field_code\":\"239\",\"period\":\"FY+3\"},{\"field_code\":\"239\",\"period\":\"FY+4\"},{\"field_code\":\"239\",\"period\":\"FY+5\"},{\"field_code\":\"12\"},{\"field_code\":\"168\"},{\"field_code\":\"299\"},{\"field_code\":\"206\"}]",
+            "original_currency": "[\"\",\"\"]",
+            "count_arr": "[]"
+        })
         
         headers = {
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
-            'Connection': 'keep-alive',
-            'Origin': 'https://app-kafi.fiintrade.vn',
-            'Referer': 'https://app-kafi.fiintrade.vn/',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-site',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
+            'accept': 'application/json',
+            'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
+            'content-type': 'application/json',
+            'origin': 'https://valueinvesting.io',
+            'priority': 'u=1, i',
             'sec-ch-ua': '"Opera GX";v="127", "Chromium";v="143", "Not A(Brand";v="24"',
+            'sec-ch-ua-arch': '"x86"',
+            'sec-ch-ua-bitness': '"64"',
+            'sec-ch-ua-full-version': '"127.0.5778.75"',
+            'sec-ch-ua-full-version-list': '"Opera GX";v="127.0.5778.75", "Chromium";v="143.0.7499.194", "Not A(Brand";v="24.0.0.0"',
             'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"'
+            'sec-ch-ua-model': '""',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-ch-ua-platform-version': '"10.0.0"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
+            'Cookie': 'beegosessionID=c8d83cd290a878b2ef8edd8948f9667c; cf_clearance=aHgdqJ9DYvPpXFxZJi0vdiZglkvWjN9ivXJt3ZV49ME-1772535795-1.2.1.1-UySGf.5p_WYS6107qYFn5PWfppro9DkJ8uIKHqIqVqjy7lbiJLdsJRK7o1ExAd4lJH8qVSXbPVgBwkcz_VjfSdDrpJIDHcNz6TgM9GuO2cC4xEwbBcaRbjLVH6hzJarEIVNQuHts54q6uK38uKZY949QcVpPJc0b4h__YILNRultG8c1sTAbZDPDf9ud3aG7NN7i_pCOuUZV5skMtbyzBxWvLl8.jB6caY5XhEDgtx0; essay=eEXPcXslkD; _ga=GA1.1.2012916349.1772535797; twk_idm_key=m3rv0sT3N-Z878nry1I_8; TawkConnectionTime=0; twk_uuid_611c4284d6e7610a49b0ad9d=%7B%22uuid%22%3A%221.92R2xxtoQpimRheYQeUvZHdi6ymGX7CtAyweqbdOBtfXIbFEGHMcDDCQcEJIrsQRAqLq77c2yZijQgeKfqUvOjUGtDt4A0gJC3sNCEqLTzJSyzc8EfC2swVrPv10%22%2C%22version%22%3A3%2C%22domain%22%3A%22valueinvesting.io%22%2C%22ts%22%3A1772535801947%7D; token=d6jc01jaiij57r13levg; email=huunhon5597@gmail.com; _ga_4KHY6KT2C0=GS2.1.s1772535796$o1$g1$t1772537684$j6$l0$h0; email=huunhon5597@gmail.com'
         }
         
         session = _get_session()
-        response = session.get(url, headers=headers, timeout=15)
+        response = session.post(url, headers=headers, data=payload, timeout=15)
         
-        print(f"FiinTrade API status: {response.status_code}")
+        print(f"valueinvesting.io API status: {response.status_code}")
         
         if response.status_code != 200:
-            print(f"FiinTrade API returned status {response.status_code}")
+            print(f"valueinvesting.io API returned status {response.status_code}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
@@ -288,50 +400,25 @@ def get_peg(symbol):
         
         response_data = response.json()
         
-        if 'items' not in response_data:
-            print(f"Không tìm thấy dữ liệu cho {symbol}")
+        if 'from_ar' not in response_data or 'main' not in response_data['from_ar']:
+            print(f"Invalid response structure for {symbol}")
             return {
                 'peg_ratio': None,
                 'pe_ratio': pe,
                 'eps_current': None,
                 'eps_forward': None,
                 'eps_growth': None,
-                'note': 'No data in API response'
+                'note': 'Invalid response structure'
             }
         
-        data = pd.DataFrame(response_data['items'])
+        response = response_data['from_ar']['main']
+        df = pd.DataFrame(response)
+        df = df.transpose()
         
-        if data.empty:
-            print(f"Dữ liệu trống cho {symbol}")
-            return {
-                'peg_ratio': None,
-                'pe_ratio': pe,
-                'eps_current': None,
-                'eps_forward': None,
-                'eps_growth': None,
-                'note': 'Empty data from API'
-            }
+        # Get EPS current (103_0)
+        eps_current = df['103_0'].iloc[0] if '103_0' in df.columns and not df['103_0'].empty else None
         
-        # Get summary column
-        if 'summary' not in data.columns:
-            print(f"Không tìm thấy cột 'summary' trong dữ liệu cho {symbol}")
-            return {
-                'peg_ratio': None,
-                'pe_ratio': pe,
-                'eps_current': None,
-                'eps_forward': None,
-                'eps_growth': None,
-                'note': 'No summary column in data'
-            }
-        
-        # Convert the summary data to DataFrame
-        summary_data = pd.DataFrame(data['summary'].tolist())
-        
-        # Get EPS values: rtd14 = EPS hiện tại (TTM), rtd53 = EPS forward
-        eps_current = summary_data['rtd14'].iloc[0] if 'rtd14' in summary_data.columns else None
-        eps_forward = summary_data['rtd53'].iloc[0] if 'rtd53' in summary_data.columns else None
-        
-        print(f"EPS hiện tại: {eps_current}, EPS forward: {eps_forward}")
+        print(f"EPS hiện tại (103_0): {eps_current}")
         
         if eps_current is None or pd.isna(eps_current):
             print(f"Không có EPS hiện tại cho {symbol}")
@@ -339,47 +426,216 @@ def get_peg(symbol):
                 'peg_ratio': None,
                 'pe_ratio': pe,
                 'eps_current': None,
-                'eps_forward': eps_forward,
+                'eps_forward': None,
                 'eps_growth': None,
                 'note': 'No current EPS available'
             }
         
-        # Calculate EPS growth if we have both current and forward EPS
-        eps_growth_pct = None
+        # Get analyst counts for each year (232_FY+1, 232_FY+2, 232_FY+3)
+        analyst_counts = {}
+        eps_forecasts = {}
+        
+        for year in ['FY+1', 'FY+2', 'FY+3']:
+            count_col = f'232_{year}'
+            eps_col = f'233_{year}'
+            
+            if count_col in df.columns and eps_col in df.columns:
+                analyst_count = df[count_col].iloc[0] if not df[count_col].empty else 0
+                eps_forecast = df[eps_col].iloc[0] if not df[eps_col].empty else None
+                
+                analyst_counts[year] = analyst_count
+                eps_forecasts[year] = eps_forecast
+                
+                print(f"Năm {year}: {analyst_count} analysts, EPS = {eps_forecast}")
+        
+        # Filter years with > 5 analysts
+        valid_years = [year for year, count in analyst_counts.items() if count > 5]
+        
+        if not valid_years:
+            print(f"Không có năm nào có đủ > 5 analysts dự phóng cho {symbol}")
+            return {
+                'peg_ratio': None,
+                'pe_ratio': pe,
+                'eps_current': float(eps_current) if not pd.isna(eps_current) else None,
+                'eps_forward': None,
+                'eps_growth': None,
+                'note': 'Not enough analyst coverage (> 5 required)'
+            }
+        
+        print(f"Các năm hợp lệ: {valid_years}")
+        
+        # Calculate EPS growth for each valid year
+        eps_growth_rates = []
+        
+        for year in valid_years:
+            eps_fwd = eps_forecasts.get(year)
+            if eps_fwd is None or pd.isna(eps_fwd):
+                continue
+            
+            # Determine previous year EPS
+            if year == 'FY+1':
+                # Compare with current EPS (103_0)
+                prev_eps = eps_current
+            elif year == 'FY+2':
+                # Compare with FY+1
+                prev_eps = eps_forecasts.get('FY+1')
+            else:  # FY+3
+                # Compare with FY+2
+                prev_eps = eps_forecasts.get('FY+2')
+            
+            if prev_eps is None or pd.isna(prev_eps) or prev_eps == 0:
+                continue
+            
+            # Calculate growth rate
+            growth_rate = ((eps_fwd - prev_eps) / abs(prev_eps)) * 100
+            eps_growth_rates.append(growth_rate)
+            print(f"Tăng trưởng EPS {year}: {growth_rate:.2f}%")
+        
+        if not eps_growth_rates:
+            print(f"Không thể tính tăng trưởng EPS cho {symbol}")
+            return {
+                'peg_ratio': None,
+                'pe_ratio': pe,
+                'eps_current': float(eps_current) if not pd.isna(eps_current) else None,
+                'eps_forward': None,
+                'eps_growth': None,
+                'note': 'Cannot calculate EPS growth'
+            }
+        
+        # Average EPS growth
+        avg_eps_growth = sum(eps_growth_rates) / len(eps_growth_rates)
+        print(f"Tăng trưởng EPS trung bình: {avg_eps_growth:.2f}%")
+        
+        # Get the forward EPS (from the latest valid year)
+        eps_forward = eps_forecasts.get(valid_years[-1])
+        
+        # Calculate PEG ratio (only if growth is positive)
+        peg_ratio = None
         note = ''
         
-        if eps_forward is not None and not pd.isna(eps_forward) and eps_current > 0:
-            eps_growth_pct = ((eps_forward - eps_current) / abs(eps_current)) * 100
-            print(f"EPS growth: {eps_growth_pct:.2f}%")
-            
-            # Check if eps_growth is negative
-            if eps_growth_pct < 0:
-                note = f'EPS growth âm ({eps_growth_pct:.2f}%) - Không có ý nghĩa tính PEG'
-                print(f"{note}")
-        
-        # Calculate PEG ratio: P/E / EPS Growth Rate (%)
-        # PEG = P/E / (EPS Growth %) - only calculate if growth is positive
-        peg_ratio = None
-        if eps_growth_pct is not None and eps_growth_pct > 0:
-            peg_ratio = pe / eps_growth_pct
+        if avg_eps_growth > 0:
+            peg_ratio = pe / avg_eps_growth
             note = 'PEG calculated successfully'
-        elif eps_growth_pct is not None and eps_growth_pct <= 0:
-            # Note already set above
-            pass
-        else:
-            note = 'Không đủ dữ liệu để tính EPS growth'
+        elif avg_eps_growth <= 0:
+            note = f'EPS growth âm ({avg_eps_growth:.2f}%) - Không có ý nghĩa tính PEG'
         
         return {
             'peg_ratio': peg_ratio,
             'pe_ratio': pe,
-            'eps_current': eps_current,
-            'eps_forward': eps_forward,
-            'eps_growth': eps_growth_pct,
+            'eps_current': float(eps_current) if not pd.isna(eps_current) else None,
+            'eps_forward': float(eps_forward) if eps_forward is not None and not pd.isna(eps_forward) else None,
+            'eps_growth': avg_eps_growth,
             'note': note
         }
 
     except Exception as e:
         print(f"Có lỗi xảy ra trong hàm get_peg: {e}")
+        return None
+
+
+def _get_eps_from_valueinvesting(symbol):
+    """Get EPS data from valueinvesting.io API."""
+    url = f"https://valueinvesting.io/company/estimates?limit=12&symbol={symbol}.VN"
+    payload = json.dumps({
+        "conditions": "[]", "mode": "watchlist", "existing_columns": "[]", "screener_currency": "",
+        "latest_tracking_code": "1",
+        "metrics_to_queries": "[\"256\",\"258\",\"260\",\"262\",\"146\",\"146\",\"146\",\"146\",\"146\",\"146\",\"103\",\"103\",\"103\",\"103\",\"103\",\"103\",\"233\",\"233\",\"233\",\"233\",\"233\",\"232\",\"232\",\"232\",\"232\",\"232\",\"237\",\"237\",\"237\",\"237\",\"237\",\"234\",\"234\",\"234\",\"234\",\"234\",\"235\",\"235\",\"235\",\"235\",\"235\",\"238\",\"238\",\"238\",\"238\",\"238\",\"239\",\"239\",\"239\",\"239\",\"239\",\"12\",\"168\",\"299\",\"206\"]",
+        "metrics_to_queries_period": "[\"-1\",\"-1\",\"-1\",\"-1\",\"0\",\"FY-1\",\"FY-2\",\"FY-3\",\"FY-4\",\"FY-5\",\"0\",\"FY-1\",\"FY-2\",\"FY-3\",\"FY-4\",\"FY-5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"FY+1\",\"FY+2\",\"FY+3\",\"FY+4\",\"FY+5\",\"-1\",\"-1\",\"-1\",\"-1\"]",
+        "metrics_to_queries_currency_type": "[\"2\",\"2\",\"2\",\"2\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"0\",\"0\",\"0\",\"0\",\"0\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"0\",\"0\",\"0\",\"2\"]",
+        "filter_default_freq": "[]", "filter_metrics": "[]", "filter_currency_type": "[]",
+        "metrics_financials_grouping": "[\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\",\"NF\"]",
+        "metrics_which_latest_days": "[\"None\",\"None\",\"None\",\"None\",\"None\",\"FY\",\"FY\",\"FY\",\"FY\",\"FY\",\"None\",\"FY\",\"FY\",\"FY\",\"FY\",\"FY\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"analystEstimateAnnual\",\"None\",\"None\",\"None\",\"None\"]",
+        "name_of_considered_screener": "",
+        "ticker_str": "(('" + symbol + "', 'VN'))",
+        "original_filters": "[]",
+        "original_columns": "[{\"field_code\":\"256\"},{\"field_code\":\"258\"},{\"field_code\":\"260\"},{\"field_code\":\"262\"},{\"field_code\":\"146\",\"period\":\"FY@6\"},{\"field_code\":\"103\",\"period\":\"FY@6\"},{\"field_code\":\"233\",\"period\":\"FY+1\"},{\"field_code\":\"233\",\"period\":\"FY+2\"},{\"field_code\":\"233\",\"period\":\"FY+3\"},{\"field_code\":\"233\",\"period\":\"FY+4\"},{\"field_code\":\"233\",\"period\":\"FY+5\"},{\"field_code\":\"232\",\"period\":\"FY+1\"},{\"field_code\":\"232\",\"period\":\"FY+2\"},{\"field_code\":\"232\",\"period\":\"FY+3\"},{\"field_code\":\"232\",\"period\":\"FY+4\"},{\"field_code\":\"232\",\"period\":\"FY+5\"},{\"field_code\":\"237\",\"period\":\"FY+1\"},{\"field_code\":\"237\",\"period\":\"FY+2\"},{\"field_code\":\"237\",\"period\":\"FY+3\"},{\"field_code\":\"237\",\"period\":\"FY+4\"},{\"field_code\":\"237\",\"period\":\"FY+5\"},{\"field_code\":\"234\",\"period\":\"FY+1\"},{\"field_code\":\"234\",\"period\":\"FY+2\"},{\"field_code\":\"234\",\"period\":\"FY+3\"},{\"field_code\":\"234\",\"period\":\"FY+4\"},{\"field_code\":\"234\",\"period\":\"FY+5\"},{\"field_code\":\"235\",\"period\":\"FY+1\"},{\"field_code\":\"235\",\"period\":\"FY+2\"},{\"field_code\":\"235\",\"period\":\"FY+3\"},{\"field_code\":\"235\",\"period\":\"FY+4\"},{\"field_code\":\"235\",\"period\":\"FY+5\"},{\"field_code\":\"238\",\"period\":\"FY+1\"},{\"field_code\":\"238\",\"period\":\"FY+2\"},{\"field_code\":\"238\",\"period\":\"FY+3\"},{\"field_code\":\"238\",\"period\":\"FY+4\"},{\"field_code\":\"238\",\"period\":\"FY+5\"},{\"field_code\":\"239\",\"period\":\"FY+1\"},{\"field_code\":\"239\",\"period\":\"FY+2\"},{\"field_code\":\"239\",\"period\":\"FY+3\"},{\"field_code\":\"239\",\"period\":\"FY+4\"},{\"field_code\":\"239\",\"period\":\"FY+5\"},{\"field_code\":\"12\"},{\"field_code\":\"168\"},{\"field_code\":\"299\"},{\"field_code\":\"206\"}]",
+        "original_currency": "[\"\",\"\"]", "count_arr": "[]"
+    })
+    headers = {
+        'accept': 'application/json', 'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
+        'content-type': 'application/json', 'origin': 'https://valueinvesting.io', 'priority': 'u=1, i',
+        'sec-ch-ua': '"Opera GX";v="127", "Chromium";v="143", "Not A(Brand";v="24"',
+        'sec-ch-ua-arch': '"x86"', 'sec-ch-ua-bitness': '"64"',
+        'sec-ch-ua-full-version': '"127.0.5778.75"',
+        'sec-ch-ua-full-version-list': '"Opera GX";v="127.0.5778.75", "Chromium";v="143.0.7499.194", "Not A(Brand";v="24.0.0.0"',
+        'sec-ch-ua-mobile': '?0', 'sec-ch-ua-model': '""', 'sec-ch-ua-platform': '"Windows"',
+        'sec-ch-ua-platform-version': '"10.0.0"', 'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
+        'Cookie': 'beegosessionID=c8d83cd290a878b2ef8edd8948f9667c; cf_clearance=aHgdqJ9DYvPpXFxZJi0vdiZglkvWjN9ivXJt3ZV49ME-1772535795-1.2.1.1-UySGf.5p_WYS6107qYFn5PWfppro9DkJ8uIKHqIqVqjy7lbiJLdsJRK7o1ExAd4lJH8qVSXbPVgBwkcz_VjfSdDrpJIDHcNz6TgM9GuO2cC4xEwbBcaRbjLVH6hzJarEIVNQuHts54q6uK38uKZY949QcVpPJc0b4h__YILNRultG8c1sTAbZDPDf9ud3aG7NN7i_pCOuUZV5skMtbyzBxWvLl8.jB6caY5XhEDgtx0; essay=eEXPcXslkD; _ga=GA1.1.2012916349.1772535797; twk_idm_key=m3rv0sT3N-Z878nry1I_8; TawkConnectionTime=0; twk_uuid_611c4284d6e7610a49b0ad9d=%7B%22uuid%22%3A%221.92R2xxtoQpimRheYQeUvZHdi6ymGX7CtAyweqbdOBtfXIbFEGHMcDDCQcEJIrsQRAqLq77c2yZijQgeKfqUvOjUGtDt4A0gJC3sNCEqLTzJSyzc8EfC2swVrPv10%22%2C%22version%22%3A3%2C%22domain%22%3A%22valueinvesting.io%22%2C%22ts%22%3A1772535801947%7D; token=d6jc01jaiij57r13levg; email=huunhon5597@gmail.com; _ga_4KHY6KT2C0=GS2.1.s1772535796$o1$g1$t1772537684$j6$l0$h0; email=huunhon5597@gmail.com'
+    }
+    try:
+        session = _get_session()
+        response = session.post(url, headers=headers, data=payload, timeout=15)
+        if response.status_code != 200:
+            return None
+        response_data = response.json()
+        if 'from_ar' not in response_data or 'main' not in response_data['from_ar']:
+            return None
+        response = response_data['from_ar']['main']
+        df = pd.DataFrame(response).transpose()
+        eps_current = df['103_0'].iloc[0] if '103_0' in df.columns and not df['103_0'].empty else None
+        if eps_current is None or pd.isna(eps_current):
+            return None
+        analyst_counts, eps_forecasts = {}, {}
+        for year in ['FY+1', 'FY+2', 'FY+3']:
+            count_col, eps_col = f'232_{year}', f'233_{year}'
+            if count_col in df.columns and eps_col in df.columns:
+                analyst_counts[year] = df[count_col].iloc[0] if not df[count_col].empty else 0
+                eps_forecasts[year] = df[eps_col].iloc[0] if not df[eps_col].empty else None
+        valid_years = [year for year, count in analyst_counts.items() if count > 5]
+        if not valid_years:
+            return None
+        eps_growth_rates = []
+        for year in valid_years:
+            eps_fwd = eps_forecasts.get(year)
+            if eps_fwd is None or pd.isna(eps_fwd):
+                continue
+            prev_eps = eps_current if year == 'FY+1' else (eps_forecasts.get('FY+1') if year == 'FY+2' else eps_forecasts.get('FY+2'))
+            if prev_eps is None or pd.isna(prev_eps) or prev_eps == 0:
+                continue
+            eps_growth_rates.append(((eps_fwd - prev_eps) / abs(prev_eps)) * 100)
+        if not eps_growth_rates:
+            return None
+        avg_growth = sum(eps_growth_rates) / len(eps_growth_rates)
+        return {'eps_current': float(eps_current), 'eps_forward': float(eps_forecasts.get(valid_years[-1])), 'eps_growth': avg_growth}
+    except Exception as e:
+        print(f"Error getting EPS from valueinvesting.io: {e}")
+        return None
+
+
+def _get_eps_from_fiintrade(symbol):
+    """Get EPS data from FiinTrade API."""
+    url = f"https://wl-fundamental.fiintrade.vn/Snapshot/GetSnapshot?language=vi&OrganCode={symbol}"
+    headers = {
+        'Accept': 'application/json, text/plain, */*', 'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
+        'Connection': 'keep-alive', 'Origin': 'https://app-kafi.fiintrade.vn', 'Referer': 'https://app-kafi.fiintrade.vn/',
+        'Sec-Fetch-Dest': 'empty', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Site': 'same-site',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0 (Edition globalgames-sd)',
+        'sec-ch-ua': '"Opera GX";v="127", "Chromium";v="143", "Not A(Brand";v="24"', 'sec-ch-ua-mobile': '?0', 'sec-ch-ua-platform': '"Windows"'
+    }
+    try:
+        session = _get_session()
+        response = session.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return None
+        response_data = response.json()
+        if 'items' not in response_data:
+            return None
+        data = pd.DataFrame(response_data['items'])
+        if data.empty or 'summary' not in data.columns:
+            return None
+        summary_data = pd.DataFrame(data['summary'].tolist())
+        eps_current = summary_data['rtd14'].iloc[0] if 'rtd14' in summary_data.columns else None
+        eps_forward = summary_data['rtd53'].iloc[0] if 'rtd53' in summary_data.columns else None
+        if eps_current is None or pd.isna(eps_current):
+            return None
+        eps_growth = None
+        if eps_forward is not None and not pd.isna(eps_forward) and eps_current > 0:
+            eps_growth = ((eps_forward - eps_current) / abs(eps_current)) * 100
+        return {'eps_current': float(eps_current), 'eps_forward': float(eps_forward) if eps_forward and not pd.isna(eps_forward) else None, 'eps_growth': eps_growth}
+    except Exception as e:
+        print(f"Error getting EPS from FiinTrade: {e}")
         return None
 
 
