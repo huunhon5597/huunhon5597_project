@@ -27,6 +27,20 @@ def _get_session():
         _session.mount('https://', adapter)
     return _session
 
+def _normalize_symbol(symbol):
+    """
+    Normalize stock symbol to uppercase.
+    
+    Args:
+        symbol (str): Stock symbol
+        
+    Returns:
+        str: Uppercase stock symbol
+    """
+    if symbol is None:
+        return None
+    return symbol.strip().upper()
+
 
 def get_pb_pe(symbol, start_date=None, end_date=None):
     """
@@ -40,6 +54,7 @@ def get_pb_pe(symbol, start_date=None, end_date=None):
     Returns:
         pd.DataFrame: DataFrame with columns ['symbol', 'date', 'price', 'pe', 'pb']
     """
+    symbol = _normalize_symbol(symbol)
     if end_date is None:
         end_date = dt.now().strftime('%Y-%m-%d')
     if start_date is None:
@@ -147,6 +162,7 @@ def ref_pb_pe(symbol, start_date=None, end_date=None):
             - sec_avg: Sector average
             - sec_med: Sector median
     """
+    symbol = _normalize_symbol(symbol)
     # Get TTM values for the target symbol
     df = get_pb_pe(symbol, start_date, end_date)
     pb_ttm_avg = df['pb'].mean()
@@ -233,6 +249,7 @@ def get_peg(symbol):
             - data_source: Source of EPS data ('valueinvesting.io' or 'fiintrade')
             - note: Status message
     """
+    symbol = _normalize_symbol(symbol)
     print(f"Calculating PEG for {symbol}")
     
     try:
@@ -649,6 +666,7 @@ def fireant_valuation(symbol):
     Returns:
         float: The composed/estimated price from Fireant, or None if failed
     """
+    symbol = _normalize_symbol(symbol)
     url = f"https://restv2.fireant.vn/symbols/{symbol}/estimated-price"
     
     headers = {
@@ -694,6 +712,7 @@ def analyst_price_targets(symbol):
             - median: Median price target
             Or None if failed
     """
+    symbol = _normalize_symbol(symbol)
     url = f"https://valueinvesting.io/company/estimates?limit=12&symbol={symbol}.VN"
     
     payload = json.dumps({
