@@ -1,12 +1,8 @@
 ***General
-1. Trang chủ
-- Các nút hành động nhanh
+Lấy token cho cookie
+Tích hợp AI
 
-2. Thị trường
-- Tải dữ liệu nhanh hơn
-3. Cổ phiếu
-
-
-Phân loại nhà đầu tư uy tín hơn
 ***Streamlit app
 Tải dữ liệu nhanh hơn
+Phân loại nhà đầu tư uy tín hơn
+Các nút hành động nhanh
