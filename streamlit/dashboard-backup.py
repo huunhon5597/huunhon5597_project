@@ -1999,7 +1999,7 @@ elif main_menu == "Thị trường":
                 st.info("Đang tải dữ liệu...")
 
 elif main_menu == "Cổ phiếu":
-    st.header("📊 Cổ phiếu")
+    st.header("💹 Cổ phiếu")
     
     # Submenu for Cổ phiếu - with placeholder option
     co_phieu_submenu = st.sidebar.selectbox(
@@ -3197,7 +3197,7 @@ elif main_menu == "Cổ phiếu":
                 - Cập nhật theo thời gian thực
                 
                 **Analyst Price Targets**
-                - Dự báo giá từ các chuyên gia phân tích (Yahoo Finance)
+                - Dự báo giá từ các chuyên gia phân tích (valueinvesting.io)
                 - High/Low/Mean/Median target prices
                 - So sánh với giá hiện tại để tìm cơ hội
                 
@@ -3214,7 +3214,7 @@ elif main_menu == "Cổ phiếu":
                 - Delta metrics hiển thị % chênh lệch
                 
                 **Dữ liệu Thời gian Thực**
-                - Kết nối API Fireant, FiinTrade, Yahoo Finance
+                - Kết nối API Fireant, FiinTrade, valueinvesting.io
                 - Cập nhật định kỳ tự động
                 """)
             

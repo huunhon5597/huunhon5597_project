@@ -1,8 +1,11 @@
 ***General
 Lấy token cho cookie
-Tích hợp AI
+
 
 ***Streamlit app
 Tải dữ liệu nhanh hơn
 Phân loại nhà đầu tư uy tín hơn
 Các nút hành động nhanh
+Tích hợp AI
+Annotate trên biểu đồ
+Cập nhật tin tức

@@ -34,6 +34,55 @@ def get_date_range(period):
     start_date = end_date - timedelta(days=days_map.get(period, 0))
     return start_date, end_date
 
+def navigate_to(menu_name):
+    """Navigate to a specific menu using query params."""
+    st.query_params._nav_menu = menu_name
+    st.rerun()
+
+def render_main_navigation():
+    """Render main menu navigation buttons."""
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("🏠 Trang chủ", key="nav_home"):
+            navigate_to("Trang chủ")
+    with col2:
+        if st.button("📈 Thị trường", key="nav_market"):
+            navigate_to("Thị trường")
+    with col3:
+        if st.button("💹 Cổ phiếu", key="nav_stock"):
+            navigate_to("Cổ phiếu")
+    with col4:
+        if st.button("🧪 Test", key="nav_test"):
+            navigate_to("Test")
+
+def render_submenu_navigation(submenu_key, submenu_options):
+    """Render submenu navigation buttons based on current selection."""
+    if not submenu_options:
+        return
+    
+    # Create columns for submenu buttons
+    cols = st.columns(len(submenu_options))
+    for i, (submenu_name, submenu_value) in enumerate(submenu_options.items()):
+        with cols[i]:
+            # Get icon based on submenu name
+            icon = "📊"  # default
+            if "Tâm lý" in submenu_name:
+                icon = "🧠"
+            elif "Phân loại nhà đầu tư" in submenu_name:
+                icon = "👥"
+            elif "Định giá" in submenu_name:
+                icon = "💰"
+            elif "Phân loại giao dịch" in submenu_name:
+                icon = "🔄"
+            
+            # Check if current submenu is selected
+            is_active = st.session_state.get(submenu_key) == submenu_value
+            button_type = "primary" if is_active else "secondary"
+            
+            if st.button(f"{icon} {submenu_name}", key=f"subnav_{submenu_value}"):
+                st.session_state[submenu_key] = submenu_value
+                st.rerun()
+
 def get_job_status(key):
     """
     Checks the status of a job.
@@ -762,12 +811,32 @@ if "clear_content" not in st.session_state:
 if "prev_main_menu" not in st.session_state:
     st.session_state.prev_main_menu = "Trang chủ"
 
+main_menu_options = ["Trang chủ", "Thị trường", "Cổ phiếu", "Test"]
+
+# Initialize session state for menu if not exists
+if "main_menu" not in st.session_state:
+    st.session_state.main_menu = "Trang chủ"
+
+# Handle navigation via query params (set menu from quick action buttons)
+# Use a separate internal key to avoid conflict with widget's session state
+if "_nav_menu" in st.query_params:
+    nav_target = st.query_params._nav_menu
+    if nav_target in main_menu_options:
+        # Set the actual menu directly
+        st.session_state.main_menu = nav_target
+    # Clear the query param after using it
+    st.query_params.clear()
+
+# Get the index from session state - but ensure we use the correct value
+current_menu = st.session_state.main_menu
+if current_menu not in main_menu_options:
+    current_menu = "Trang chủ"
+
 main_menu = st.sidebar.selectbox(
     "Menu chính", 
-    ["Trang chủ", "Thị trường", "Cổ phiếu", "Test"], 
-    index=0, 
-    key="main_menu",
-    on_change=clear_content_on_menu_change
+    main_menu_options, 
+    index=main_menu_options.index(current_menu), 
+    key="main_menu"
 )
 
 # Check if menu changed
@@ -792,6 +861,33 @@ if main_menu == "Trang chủ":
     from stock_data.stock_data import get_stock_history
     
     st.title("🏠 Trang chủ Dashboard")
+    st.markdown("---")
+    
+    # Quick actions - right after title
+    st.subheader("⚡ Menu")
+    
+    action_col1, action_col2, action_col3, action_col4 = st.columns(4)
+    
+    with action_col1:
+        if st.button("🏠 Trang chủ", key="quick_home"):
+            st.query_params._nav_menu = "Trang chủ"
+            st.rerun()
+    
+    with action_col2:
+        if st.button("📈 Thị trường", key="quick_market"):
+            st.query_params._nav_menu = "Thị trường"
+            st.rerun()
+    
+    with action_col3:
+        if st.button("💹 Cổ phiếu", key="quick_valuation"):
+            st.query_params._nav_menu = "Cổ phiếu"
+            st.rerun()
+    
+    with action_col4:
+        if st.button("🧪 Test", key="quick_test"):
+            st.query_params._nav_menu = "Test"
+            st.rerun()
+    
     st.markdown("---")
     
     # Welcome section
@@ -1115,26 +1211,6 @@ if main_menu == "Trang chủ":
     
     st.markdown("---")
     
-    # Quick actions
-    st.subheader("⚡ Hành động nhanh")
-    
-    action_col1, action_col2, action_col3 = st.columns(3)
-    
-    with action_col1:
-        if st.button("📊 Xem Phân tích Định giá", key="quick_valuation"):
-            st.info("Chuyển đến mục Định giá để phân tích cổ phiếu")
-    
-    with action_col2:
-        if st.button("📈 Xem Thị trường", key="quick_market"):
-            st.info("Chuyển đến mục Thị trường để theo dõi tâm lý thị trường")
-    
-    with action_col3:
-        if st.button("🔄 Tải lại Dữ liệu", key="quick_reload"):
-            st.info("Đang tải lại dữ liệu mới nhất...")
-            st.success("Dữ liệu đã được cập nhật!")
-    
-    st.markdown("---")
-    
     # Footer
     st.markdown("""
     <div style='text-align: center; color: #666; padding: 20px;'>
@@ -1151,6 +1227,24 @@ elif main_menu == "Thị trường":
     
     st.header("📈 Thị trường")
     
+    # Main navigation buttons
+    render_main_navigation()
+    st.markdown("---")
+    
+    # Submenu navigation buttons for Thị trường
+    st.subheader("📊 Submenu")
+    submenu_cols = st.columns(2)
+    with submenu_cols[0]:
+        if st.button("🧠 Tâm lý thị trường", key="subnav_thi_truong_tam_ly"):
+            st.session_state.thi_truong_submenu = "Tâm lý thị trường"
+            st.rerun()
+    with submenu_cols[1]:
+        if st.button("👥 Phân loại nhà đầu tư", key="subnav_thi_truong_phan_loai"):
+            st.session_state.thi_truong_submenu = "Phân loại nhà đầu tư"
+            st.rerun()
+    
+    st.markdown("---")
+    
     # Submenu for Thị trường - with placeholder option
     thi_truong_submenu = st.sidebar.selectbox(
         "Chọn submenu", 
@@ -1159,7 +1253,7 @@ elif main_menu == "Thị trường":
     )
     
     if thi_truong_submenu == "-- Chọn --":
-        st.info("👈 Vui lòng chọn một submenu từ thanh bên trái để tiếp tục.")
+        st.info("👈 Vui lòng chọn submenu từ menu bên trên hoặc thanh bên trái để tiếp tục.")
     
     elif thi_truong_submenu == "Tâm lý thị trường":
         st.subheader("📊 Cài đặt khoảng thời gian")
@@ -2001,6 +2095,24 @@ elif main_menu == "Thị trường":
 elif main_menu == "Cổ phiếu":
     st.header("💹 Cổ phiếu")
     
+    # Main navigation buttons
+    render_main_navigation()
+    st.markdown("---")
+    
+    # Submenu navigation buttons for Cổ phiếu
+    st.subheader("💰 Submenu")
+    submenu_cols = st.columns(2)
+    with submenu_cols[0]:
+        if st.button("💰 Định giá", key="subnav_co_phieu_dinh_gia"):
+            st.session_state.co_phieu_submenu = "Định giá"
+            st.rerun()
+    with submenu_cols[1]:
+        if st.button("🔄 Phân loại giao dịch", key="subnav_co_phieu_phan_loai"):
+            st.session_state.co_phieu_submenu = "Phân loại giao dịch"
+            st.rerun()
+    
+    st.markdown("---")
+    
     # Submenu for Cổ phiếu - with placeholder option
     co_phieu_submenu = st.sidebar.selectbox(
         "Chọn submenu", 
@@ -2009,7 +2121,7 @@ elif main_menu == "Cổ phiếu":
     )
     
     if co_phieu_submenu == "-- Chọn --":
-        st.info("👈 Vui lòng chọn một submenu từ thanh bên trái để tiếp tục.")
+        st.info("👈 Vui lòng chọn submenu từ menu bên trên hoặc thanh bên trái để tiếp tục.")
     
     elif co_phieu_submenu == "Định giá":
         # Import valuation-related modules only when this menu is selected
@@ -3219,23 +3331,6 @@ elif main_menu == "Cổ phiếu":
                 """)
             
             st.markdown("---")
-            
-            # Quick actions
-            st.subheader("⚡ Hành động Nhanh")
-            
-            action_col1, action_col2, action_col3 = st.columns(3)
-            
-            with action_col1:
-                if st.button("📊 Phân tích P/B", key="quick_pb"):
-                    st.info("Chuyển đến mục P/B để phân tích tỷ số P/B")
-            
-            with action_col2:
-                if st.button("📈 Phân tích P/E", key="quick_pe"):
-                    st.info("Chuyển đến mục P/E để phân tích tỷ số P/E")
-            
-            with action_col3:
-                if st.button("🔍 Tính PEG", key="quick_peg"):
-                    st.info("Chuyển đến mục PEG để tính toán PEG ratio")
     
     elif co_phieu_submenu == "Phân loại giao dịch":
         # Import investor_type function
@@ -3939,6 +4034,11 @@ elif main_menu == "Cổ phiếu":
     
 elif main_menu == "Test":
     st.header("🧪 Test API")
+    
+    # Main navigation buttons
+    render_main_navigation()
+    st.markdown("---")
+    
     st.subheader("Kiểm tra kết nối API")
     
     # Default values
