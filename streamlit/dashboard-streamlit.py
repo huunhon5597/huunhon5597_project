@@ -835,7 +835,6 @@ if current_menu not in main_menu_options:
 main_menu = st.sidebar.selectbox(
     "Menu chính", 
     main_menu_options, 
-    index=main_menu_options.index(current_menu), 
     key="main_menu"
 )
 
@@ -1504,13 +1503,14 @@ elif main_menu == "Thị trường":
         """, unsafe_allow_html=True)
         
         # Create tabs for investor classification
-        tab_tong_gia_tri, tab_tu_doanh, tab_ca_nhan_trong_nuoc, tab_to_chuc_trong_nuoc, tab_ca_nhan_nuoc_ngoai, tab_to_chuc_nuoc_ngoai = st.tabs([
+        tab_tong_gia_tri, tab_tu_doanh, tab_ca_nhan_trong_nuoc, tab_to_chuc_trong_nuoc, tab_ca_nhan_nuoc_ngoai, tab_to_chuc_nuoc_ngoai, tab_khoi_ngoai = st.tabs([
             "💰 Tổng giá trị", 
             "🏢 Tự doanh", 
             "👤 Cá nhân trong nước", 
             "🏛️ Tổ chức trong nước", 
             "🌍 Cá nhân nước ngoài", 
-            "🌐 Tổ chức nước ngoài"
+            "🌐 Tổ chức nước ngoài",
+            "📊 Khối ngoại"
         ])
         
         # --- Tổng giá trị Tab ---
@@ -1520,52 +1520,34 @@ elif main_menu == "Thị trường":
             
             st.subheader("💰 Tổng giá trị Giao dịch theo Phân loại Nhà đầu tư")
             
-            # Period selection (similar to Tâm lý thị trường)
+            # Frequency selection (Daily, Weekly, Monthly)
             period_col1, period_col2 = st.columns([3, 1])
             
             with period_col1:
-                investor_period = st.selectbox(
-                    "Chọn khoảng thời gian",
-                    ["1 tháng", "3 tháng", "6 tháng", "1 năm", "Tùy chỉnh"],
-                    index=2,
-                    key="investor_period"
+                investor_frequency = st.selectbox(
+                    "Chọn tần suất",
+                    ["Daily", "Weekly", "Monthly"],
+                    index=0,
+                    key="investor_frequency"
                 )
                 
-                if investor_period == "Tùy chỉnh":
-                    date_col1, date_col2 = st.columns(2)
-                    with date_col1:
-                        investor_start_date = st.date_input(
-                            "Ngày bắt đầu",
-                            value=datetime.now().date() - timedelta(days=180),
-                            key="investor_start_date"
-                        )
-                    with date_col2:
-                        investor_end_date = st.date_input(
-                            "Ngày kết thúc",
-                            value=datetime.now().date(),
-                            key="investor_end_date"
-                        )
-                else:
-                    investor_start_date, investor_end_date = get_date_range(investor_period)
-            
             with period_col2:
                 st.caption(f"📅 {datetime.now().strftime('%d/%m/%Y')}")
             
-            # Fixed symbol as VN-Index
-            symbol_investor = "VN-Index"
+            # Fixed symbol as VNINDEX
+            symbol_investor = "VNINDEX"
             
             # Create cache key based on parameters
-            investor_key = f"investor_{symbol_investor}_{investor_start_date}_{investor_end_date}"
-            stock_key = f"investor_stock_{symbol_investor}_{investor_start_date}_{investor_end_date}"
+            investor_key = f"investor_{symbol_investor}_{investor_frequency}"
+            stock_key = f"investor_stock_{symbol_investor}_{investor_frequency}"
             
-            # Auto-load data (similar to Tâm lý thị trường)
+            # Auto-load data
             # Submit jobs if not already in session_state or jobs
             if investor_key not in st.session_state and investor_key not in st.session_state.jobs:
                 st.session_state.jobs[investor_key] = st.session_state.executor.submit(
                     investor_type,
                     symbol=symbol_investor,
-                    start_date=investor_start_date.strftime('%Y-%m-%d'),
-                    end_date=investor_end_date.strftime('%Y-%m-%d')
+                    frequency=investor_frequency
                 )
                 st.session_state[f"{investor_key}_start_time"] = time.time()
             
@@ -1578,13 +1560,31 @@ elif main_menu == "Thị trường":
                 st.error(f"Lỗi khi tải dữ liệu: {investor_df}")
             elif inv_status == "completed" and investor_df is not None and not investor_df.empty:
                 try:
-                    # Get stock history for close price
-                    stock_df = get_stock_history(
-                        symbol=symbol_investor.replace('-Index', 'INDEX') if 'Index' in symbol_investor else symbol_investor,
-                        period="day",
-                        end_date=investor_end_date.strftime('%Y-%m-%d'),
-                        count_back=(investor_end_date - investor_start_date).days + 30
-                    )
+                    # Map expected column names
+                    # The API returns columns with 'NetValue' suffix
+                    column_mapping = {
+                        'proprietaryNetValue': 'proprietaryNetValue',
+                        'localIndividualNetValue': 'localIndividualNetValue',
+                        'localInstitutionalNetValue': 'localInstitutionalNetValue',
+                        'foreignIndividualNetValue': 'foreignIndividualNetValue',
+                        'foreignInstitutionalNetValue': 'foreignInstitutionalNetValue'
+                    }
+                    
+                    # Check which columns actually exist
+                    available_columns = {k: v for k, v in column_mapping.items() if k in investor_df.columns}
+                    
+                    if not available_columns:
+                        st.warning(f"Không tìm thấy các cột dữ liệu cần thiết. Các cột có sẵn: {investor_df.columns.tolist()}")
+                        st.stop()
+                    
+                    # Define investor columns to use - always include all 5
+                    investor_columns = [
+                        'proprietaryNetValue',
+                        'localIndividualNetValue',
+                        'localInstitutionalNetValue',
+                        'foreignIndividualNetValue',
+                        'foreignInstitutionalNetValue'
+                    ]
                     
                     # Create the chart
                     fig_investor = make_subplots(
@@ -1595,77 +1595,75 @@ elif main_menu == "Thị trường":
                     
                     # Define professional colors for each investor type
                     colors = {
-                        'Tự doanh ròng': '#e74c3c',           # Red - Proprietary trading
-                        'Cá nhân trong nước ròng': '#3498db',  # Blue - Domestic individual
-                        'Tổ chức trong nước ròng': '#2ecc71',  # Green - Domestic institutional
-                        'Cá nhân nước ngoài ròng': '#9b59b6',  # Purple - Foreign individual
-                        'Tổ chức nước ngoài ròng': '#f39c12'   # Orange - Foreign institutional
+                        'proprietaryNetValue': '#e74c3c',           # Red - Proprietary trading
+                        'localIndividualNetValue': '#3498db',  # Blue - Domestic individual
+                        'localInstitutionalNetValue': '#2ecc71',  # Green - Domestic institutional
+                        'foreignIndividualNetValue': '#9b59b6',  # Purple - Foreign individual
+                        'foreignInstitutionalNetValue': '#f39c12'   # Orange - Foreign institutional
                     }
                     
-                    # Add stacked bar traces for investor types
-                    investor_columns = [
-                        'Tự doanh ròng',
-                        'Cá nhân trong nước ròng',
-                        'Tổ chức trong nước ròng',
-                        'Cá nhân nước ngoài ròng',
-                        'Tổ chức nước ngoài ròng'
-                    ]
+                    # Vietnamese labels for display
+                    investor_labels = {
+                        'proprietaryNetValue': 'Tự doanh ròng',
+                        'localIndividualNetValue': 'Cá nhân trong nước ròng',
+                        'localInstitutionalNetValue': 'Tổ chức trong nước ròng',
+                        'foreignIndividualNetValue': 'Cá nhân nước ngoài ròng',
+                        'foreignInstitutionalNetValue': 'Tổ chức nước ngoài ròng'
+                    }
+                    
+                    # Convert tradingDate to datetime for display
+                    investor_df['tradingDate'] = pd.to_datetime(investor_df['tradingDate'])
                     
                     for col in investor_columns:
                         if col in investor_df.columns:
                             # Convert to numeric, handling any string values
                             investor_df[col] = pd.to_numeric(investor_df[col].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                             
-                            # Create custom hover text with actual dates
+                            # Use actual values (not absolute) - grouped bars
+                            y_values = investor_df[col].fillna(0)
+                            
+                            # Create custom hover text with actual dates and actual values
                             bar_hover = [
-                                f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
-                                f"{col}: {investor_df[col].iloc[i]:,.0f}"
+                                f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                                f"{investor_labels[col]}: {y_values.iloc[i]:,.0f}"
                                 for i in range(len(investor_df))
                             ]
                             
                             fig_investor.add_trace(go.Bar(
-                                x=investor_df['Ngày'],
-                                y=investor_df[col],
-                                name=col,
+                                x=investor_df['tradingDate'],
+                                y=y_values,  # Use actual values (positive above, negative below)
+                                name=investor_labels[col],
                                 marker_color=colors.get(col, '#888888'),
                                 opacity=0.85,
                                 text=bar_hover,
                                 hoverinfo='text'
                             ), secondary_y=False)
                     
-                    # Add close price line if stock data is available
-                    if stock_df is not None and not stock_df.empty:
-                        stock_df['time'] = pd.to_datetime(stock_df['time'])
-                        # Filter stock data to match the selected date range
-                        start_datetime = pd.to_datetime(investor_start_date)
-                        end_datetime = pd.to_datetime(investor_end_date)
-                        stock_df_filtered = stock_df[
-                            (stock_df['time'] >= start_datetime) & 
-                            (stock_df['time'] <= end_datetime)
+                    # Add close price line if available
+                    if 'closeValue' in investor_df.columns:
+                        investor_df['closeValue'] = pd.to_numeric(investor_df['closeValue'].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
+                        
+                        # Create hover text for close price
+                        close_hover = [
+                            f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Giá đóng cửa: {investor_df['closeValue'].iloc[i]:,.2f}"
+                            for i in range(len(investor_df))
                         ]
                         
-                        if not stock_df_filtered.empty:
-                            # Create hover text for close price
-                            close_hover = [
-                                f"Ngày: {row['time'].strftime('%Y-%m-%d')}<br>" +
-                                f"Giá đóng cửa: {row['close']:,.2f}"
-                                for _, row in stock_df_filtered.iterrows()
-                            ]
-                            
-                            fig_investor.add_trace(go.Scatter(
-                                x=stock_df_filtered['time'],
-                                y=stock_df_filtered['close'],
-                                mode='lines',
-                                name='Giá đóng cửa',
-                                line=dict(color='#1abc9c', width=2.5),
-                                text=close_hover,
-                                hoverinfo='text'
-                            ), secondary_y=True)
+                        fig_investor.add_trace(go.Scatter(
+                            x=investor_df['tradingDate'],
+                            y=investor_df['closeValue'],
+                            mode='lines',
+                            name='Giá đóng cửa VNINDEX',
+                            line=dict(color='#1abc9c', width=2.5),
+                            text=close_hover,
+                            hoverinfo='text'
+                        ), secondary_y=True)
                     
                     # Update layout with improved visual hierarchy
                     fig_investor.update_layout(
                         title=dict(
-                            text=f'💰 Phân loại Nhà đầu tư - {symbol_investor}',
+                            text=f'💰 Phân loại Nhà đầu tư - {symbol_investor} ({investor_frequency})',
                             y=0.98,
                             x=0.5,
                             xanchor='center',
@@ -1673,6 +1671,7 @@ elif main_menu == "Thị trường":
                             font=dict(size=18)
                         ),
                         barmode='relative',
+                        bargap=0.1,
                         xaxis_title='Thời gian',
                         yaxis_title='Giá trị giao dịch ròng (tỷ đồng)',
                         yaxis2_title='Giá đóng cửa',
@@ -1687,23 +1686,30 @@ elif main_menu == "Thị trường":
                             x=0.5
                         ),
                         margin=dict(l=60, r=60, t=100, b=60),
-                        bargap=0.2,
                         bargroupgap=0.1
                     )
                     
-                    fig_investor.update_xaxes(showgrid=False, zeroline=False)
+                    fig_investor.update_xaxes(
+                        showgrid=False, 
+                        zeroline=False,
+                        rangebreaks=[
+                            dict(bounds=["sat", "mon"])  # Hide weekends
+                        ]
+                    )
                     fig_investor.update_yaxes(showgrid=True, gridcolor='rgba(128,128,128,0.2)', secondary_y=False)
-                    fig_investor.update_yaxes(showgrid=False, secondary_y=True)
                     
                     st.plotly_chart(fig_investor, width='stretch')
                     
                     # Show data table
                     with st.expander("📊 Xem dữ liệu chi tiết"):
-                        st.dataframe(investor_df, width='stretch')
+                        # Rename columns for display
+                        display_df = investor_df.copy()
+                        display_df = display_df.rename(columns=investor_labels)
+                        st.dataframe(display_df, width='stretch')
                         st.download_button(
                             "Tải xuống dữ liệu CSV",
                             investor_df.to_csv(index=False),
-                            f"investor_type_{symbol_investor}_{investor_start_date.strftime('%Y%m%d')}_{investor_end_date.strftime('%Y%m%d')}.csv",
+                            f"investor_type_{symbol_investor}_{investor_frequency}.csv",
                             "text/csv"
                         )
                 
@@ -1716,13 +1722,20 @@ elif main_menu == "Thị trường":
         with tab_tu_doanh:
             st.subheader("🏢 Giao dịch Tự doanh Ròng")
             
+            # Map Vietnamese labels to English column names
+            col_name = 'proprietaryNetValue'
+            display_label = 'Tự doanh ròng'
+            
             if inv_status == "completed" and investor_df is not None and not investor_df.empty:
-                col_name = 'Tự doanh ròng'
                 if col_name in investor_df.columns:
                     investor_df[col_name] = pd.to_numeric(investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                     
-                    # Calculate cumulative value
-                    cumulative_values = investor_df[col_name].cumsum()
+                    # Convert tradingDate to datetime and sort by date
+                    investor_df['tradingDate'] = pd.to_datetime(investor_df['tradingDate'])
+                    investor_df = investor_df.sort_values('tradingDate').reset_index(drop=True)
+                    
+                    # Calculate cumulative value (fill NaN with 0 first to ensure correct cumsum)
+                    cumulative_values = investor_df[col_name].fillna(0).cumsum()
                     
                     # Create figure with secondary y-axis
                     fig_td = make_subplots(specs=[[{"secondary_y": True}]])
@@ -1731,14 +1744,14 @@ elif main_menu == "Thị trường":
                     colors_td = ['#2ecc71' if v >= 0 else '#e74c3c' for v in investor_df[col_name]]
                     
                     bar_hover_td = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị ròng: {investor_df[col_name].iloc[i]:,.0f}<br>" +
                         f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_td.add_trace(go.Bar(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=investor_df[col_name],
                         name='Giá trị ròng',
                         marker_color=colors_td,
@@ -1749,13 +1762,13 @@ elif main_menu == "Thị trường":
                     
                     # Add cumulative line
                     line_hover_td = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_td.add_trace(go.Scatter(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=cumulative_values,
                         mode='lines+markers',
                         name='Giá trị tích lũy',
@@ -1766,7 +1779,7 @@ elif main_menu == "Thị trường":
                     ), secondary_y=True)
                     
                     fig_td.update_layout(
-                        title=f'Tự doanh Ròng - VN-Index ({investor_start_date.strftime("%Y-%m-%d")} đến {investor_end_date.strftime("%Y-%m-%d")})',
+                        title=f'Tự doanh Ròng - {symbol_investor} ({investor_frequency})',
                         xaxis_title='Thời gian',
                         yaxis_title='Giá trị ròng',
                         yaxis2_title='Giá trị tích lũy',
@@ -1778,11 +1791,23 @@ elif main_menu == "Thị trường":
                         bargap=0.15
                     )
                     
-                    fig_td.update_xaxes(showgrid=False)
+                    fig_td.update_xaxes(showgrid=False, rangebreaks=[dict(bounds=["sat", "mon"])])
                     fig_td.update_yaxes(showgrid=False, secondary_y=False)
                     fig_td.update_yaxes(showgrid=False, secondary_y=True)
                     
                     st.plotly_chart(fig_td, width='stretch')
+                    
+                    # Hiển thị dữ liệu chi tiết
+                    with st.expander("📊 Xem dữ liệu chi tiết"):
+                        display_df = investor_df[['tradingDate', col_name]].copy()
+                        display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                        display_df = display_df.rename(columns={
+                            'tradingDate': 'Ngày',
+                            col_name: 'Giá trị ròng'
+                        })
+                        # Thêm cột tích lũy
+                        display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
                     st.warning("Không có dữ liệu Tự doanh ròng.")
             else:
@@ -1792,13 +1817,20 @@ elif main_menu == "Thị trường":
         with tab_ca_nhan_trong_nuoc:
             st.subheader("👤 Giao dịch Cá nhân trong nước Ròng")
             
+            # Map Vietnamese labels to English column names
+            col_name = 'localIndividualNetValue'
+            display_label = 'Cá nhân trong nước ròng'
+            
             if inv_status == "completed" and investor_df is not None and not investor_df.empty:
-                col_name = 'Cá nhân trong nước ròng'
                 if col_name in investor_df.columns:
                     investor_df[col_name] = pd.to_numeric(investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                     
-                    # Calculate cumulative value
-                    cumulative_values = investor_df[col_name].cumsum()
+                    # Convert tradingDate to datetime and sort by date
+                    investor_df['tradingDate'] = pd.to_datetime(investor_df['tradingDate'])
+                    investor_df = investor_df.sort_values('tradingDate').reset_index(drop=True)
+                    
+                    # Calculate cumulative value (fill NaN with 0 first to ensure correct cumsum)
+                    cumulative_values = investor_df[col_name].fillna(0).cumsum()
                     
                     # Create figure with secondary y-axis
                     fig_cntn = make_subplots(specs=[[{"secondary_y": True}]])
@@ -1807,14 +1839,14 @@ elif main_menu == "Thị trường":
                     colors_cntn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in investor_df[col_name]]
                     
                     bar_hover_cntn = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị ròng: {investor_df[col_name].iloc[i]:,.0f}<br>" +
                         f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_cntn.add_trace(go.Bar(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=investor_df[col_name],
                         name='Giá trị ròng',
                         marker_color=colors_cntn,
@@ -1825,13 +1857,13 @@ elif main_menu == "Thị trường":
                     
                     # Add cumulative line
                     line_hover_cntn = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_cntn.add_trace(go.Scatter(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=cumulative_values,
                         mode='lines+markers',
                         name='Giá trị tích lũy',
@@ -1842,7 +1874,7 @@ elif main_menu == "Thị trường":
                     ), secondary_y=True)
                     
                     fig_cntn.update_layout(
-                        title=f'Cá nhân trong nước Ròng - VN-Index ({investor_start_date.strftime("%Y-%m-%d")} đến {investor_end_date.strftime("%Y-%m-%d")})',
+                        title=f'Cá nhân trong nước Ròng - {symbol_investor} ({investor_frequency})',
                         xaxis_title='Thời gian',
                         yaxis_title='Giá trị ròng',
                         yaxis2_title='Giá trị tích lũy',
@@ -1854,11 +1886,23 @@ elif main_menu == "Thị trường":
                         bargap=0.15
                     )
                     
-                    fig_cntn.update_xaxes(showgrid=False)
+                    fig_cntn.update_xaxes(showgrid=False, rangebreaks=[dict(bounds=["sat", "mon"])])
                     fig_cntn.update_yaxes(showgrid=False, secondary_y=False)
                     fig_cntn.update_yaxes(showgrid=False, secondary_y=True)
                     
                     st.plotly_chart(fig_cntn, width='stretch')
+                    
+                    # Hiển thị dữ liệu chi tiết
+                    with st.expander("📊 Xem dữ liệu chi tiết"):
+                        display_df = investor_df[['tradingDate', col_name]].copy()
+                        display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                        display_df = display_df.rename(columns={
+                            'tradingDate': 'Ngày',
+                            col_name: 'Giá trị ròng'
+                        })
+                        # Thêm cột tích lũy
+                        display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
                     st.warning("Không có dữ liệu Cá nhân trong nước ròng.")
             else:
@@ -1868,13 +1912,20 @@ elif main_menu == "Thị trường":
         with tab_to_chuc_trong_nuoc:
             st.subheader("🏛️ Giao dịch Tổ chức trong nước Ròng")
             
+            # Map Vietnamese labels to English column names
+            col_name = 'localInstitutionalNetValue'
+            display_label = 'Tổ chức trong nước ròng'
+            
             if inv_status == "completed" and investor_df is not None and not investor_df.empty:
-                col_name = 'Tổ chức trong nước ròng'
                 if col_name in investor_df.columns:
                     investor_df[col_name] = pd.to_numeric(investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                     
-                    # Calculate cumulative value
-                    cumulative_values = investor_df[col_name].cumsum()
+                    # Convert tradingDate to datetime and sort by date
+                    investor_df['tradingDate'] = pd.to_datetime(investor_df['tradingDate'])
+                    investor_df = investor_df.sort_values('tradingDate').reset_index(drop=True)
+                    
+                    # Calculate cumulative value (fill NaN with 0 first to ensure correct cumsum)
+                    cumulative_values = investor_df[col_name].fillna(0).cumsum()
                     
                     # Create figure with secondary y-axis
                     fig_tctn = make_subplots(specs=[[{"secondary_y": True}]])
@@ -1883,14 +1934,14 @@ elif main_menu == "Thị trường":
                     colors_tctn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in investor_df[col_name]]
                     
                     bar_hover_tctn = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị ròng: {investor_df[col_name].iloc[i]:,.0f}<br>" +
                         f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_tctn.add_trace(go.Bar(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=investor_df[col_name],
                         name='Giá trị ròng',
                         marker_color=colors_tctn,
@@ -1901,13 +1952,13 @@ elif main_menu == "Thị trường":
                     
                     # Add cumulative line
                     line_hover_tctn = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_tctn.add_trace(go.Scatter(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=cumulative_values,
                         mode='lines+markers',
                         name='Giá trị tích lũy',
@@ -1918,7 +1969,7 @@ elif main_menu == "Thị trường":
                     ), secondary_y=True)
                     
                     fig_tctn.update_layout(
-                        title=f'Tổ chức trong nước Ròng - VN-Index ({investor_start_date.strftime("%Y-%m-%d")} đến {investor_end_date.strftime("%Y-%m-%d")})',
+                        title=f'Tổ chức trong nước Ròng - {symbol_investor} ({investor_frequency})',
                         xaxis_title='Thời gian',
                         yaxis_title='Giá trị ròng',
                         yaxis2_title='Giá trị tích lũy',
@@ -1930,11 +1981,23 @@ elif main_menu == "Thị trường":
                         bargap=0.15
                     )
                     
-                    fig_tctn.update_xaxes(showgrid=False)
+                    fig_tctn.update_xaxes(showgrid=False, rangebreaks=[dict(bounds=["sat", "mon"])])
                     fig_tctn.update_yaxes(showgrid=False, secondary_y=False)
                     fig_tctn.update_yaxes(showgrid=False, secondary_y=True)
                     
                     st.plotly_chart(fig_tctn, width='stretch')
+                    
+                    # Hiển thị dữ liệu chi tiết
+                    with st.expander("📊 Xem dữ liệu chi tiết"):
+                        display_df = investor_df[['tradingDate', col_name]].copy()
+                        display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                        display_df = display_df.rename(columns={
+                            'tradingDate': 'Ngày',
+                            col_name: 'Giá trị ròng'
+                        })
+                        # Thêm cột tích lũy
+                        display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
                     st.warning("Không có dữ liệu Tổ chức trong nước ròng.")
             else:
@@ -1944,13 +2007,20 @@ elif main_menu == "Thị trường":
         with tab_ca_nhan_nuoc_ngoai:
             st.subheader("🌍 Giao dịch Cá nhân nước ngoài Ròng")
             
+            # Map Vietnamese labels to English column names
+            col_name = 'foreignIndividualNetValue'
+            display_label = 'Cá nhân nước ngoài ròng'
+            
             if inv_status == "completed" and investor_df is not None and not investor_df.empty:
-                col_name = 'Cá nhân nước ngoài ròng'
                 if col_name in investor_df.columns:
                     investor_df[col_name] = pd.to_numeric(investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                     
-                    # Calculate cumulative value
-                    cumulative_values = investor_df[col_name].cumsum()
+                    # Convert tradingDate to datetime and sort by date
+                    investor_df['tradingDate'] = pd.to_datetime(investor_df['tradingDate'])
+                    investor_df = investor_df.sort_values('tradingDate').reset_index(drop=True)
+                    
+                    # Calculate cumulative value (fill NaN with 0 first to ensure correct cumsum)
+                    cumulative_values = investor_df[col_name].fillna(0).cumsum()
                     
                     # Create figure with secondary y-axis
                     fig_cnnn = make_subplots(specs=[[{"secondary_y": True}]])
@@ -1959,14 +2029,14 @@ elif main_menu == "Thị trường":
                     colors_cnnn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in investor_df[col_name]]
                     
                     bar_hover_cnnn = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị ròng: {investor_df[col_name].iloc[i]:,.0f}<br>" +
                         f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_cnnn.add_trace(go.Bar(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=investor_df[col_name],
                         name='Giá trị ròng',
                         marker_color=colors_cnnn,
@@ -1977,13 +2047,13 @@ elif main_menu == "Thị trường":
                     
                     # Add cumulative line
                     line_hover_cnnn = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_cnnn.add_trace(go.Scatter(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=cumulative_values,
                         mode='lines+markers',
                         name='Giá trị tích lũy',
@@ -1994,7 +2064,7 @@ elif main_menu == "Thị trường":
                     ), secondary_y=True)
                     
                     fig_cnnn.update_layout(
-                        title=f'Cá nhân nước ngoài Ròng - VN-Index ({investor_start_date.strftime("%Y-%m-%d")} đến {investor_end_date.strftime("%Y-%m-%d")})',
+                        title=f'Cá nhân nước ngoài Ròng - {symbol_investor} ({investor_frequency})',
                         xaxis_title='Thời gian',
                         yaxis_title='Giá trị ròng',
                         yaxis2_title='Giá trị tích lũy',
@@ -2006,11 +2076,23 @@ elif main_menu == "Thị trường":
                         bargap=0.15
                     )
                     
-                    fig_cnnn.update_xaxes(showgrid=False)
+                    fig_cnnn.update_xaxes(showgrid=False, rangebreaks=[dict(bounds=["sat", "mon"])])
                     fig_cnnn.update_yaxes(showgrid=False, secondary_y=False)
                     fig_cnnn.update_yaxes(showgrid=False, secondary_y=True)
                     
                     st.plotly_chart(fig_cnnn, width='stretch')
+                    
+                    # Hiển thị dữ liệu chi tiết
+                    with st.expander("📊 Xem dữ liệu chi tiết"):
+                        display_df = investor_df[['tradingDate', col_name]].copy()
+                        display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                        display_df = display_df.rename(columns={
+                            'tradingDate': 'Ngày',
+                            col_name: 'Giá trị ròng'
+                        })
+                        # Thêm cột tích lũy
+                        display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
                     st.warning("Không có dữ liệu Cá nhân nước ngoài ròng.")
             else:
@@ -2020,13 +2102,20 @@ elif main_menu == "Thị trường":
         with tab_to_chuc_nuoc_ngoai:
             st.subheader("🌐 Giao dịch Tổ chức nước ngoài Ròng")
             
+            # Map Vietnamese labels to English column names
+            col_name = 'foreignInstitutionalNetValue'
+            display_label = 'Tổ chức nước ngoài ròng'
+            
             if inv_status == "completed" and investor_df is not None and not investor_df.empty:
-                col_name = 'Tổ chức nước ngoài ròng'
                 if col_name in investor_df.columns:
                     investor_df[col_name] = pd.to_numeric(investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                     
-                    # Calculate cumulative value
-                    cumulative_values = investor_df[col_name].cumsum()
+                    # Convert tradingDate to datetime and sort by date
+                    investor_df['tradingDate'] = pd.to_datetime(investor_df['tradingDate'])
+                    investor_df = investor_df.sort_values('tradingDate').reset_index(drop=True)
+                    
+                    # Calculate cumulative value (fill NaN with 0 first to ensure correct cumsum)
+                    cumulative_values = investor_df[col_name].fillna(0).cumsum()
                     
                     # Create figure with secondary y-axis
                     fig_tcnn = make_subplots(specs=[[{"secondary_y": True}]])
@@ -2035,14 +2124,14 @@ elif main_menu == "Thị trường":
                     colors_tcnn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in investor_df[col_name]]
                     
                     bar_hover_tcnn = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị ròng: {investor_df[col_name].iloc[i]:,.0f}<br>" +
                         f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_tcnn.add_trace(go.Bar(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=investor_df[col_name],
                         name='Giá trị ròng',
                         marker_color=colors_tcnn,
@@ -2053,13 +2142,13 @@ elif main_menu == "Thị trường":
                     
                     # Add cumulative line
                     line_hover_tcnn = [
-                        f"Ngày: {investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                         f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                         for i in range(len(investor_df))
                     ]
                     
                     fig_tcnn.add_trace(go.Scatter(
-                        x=investor_df['Ngày'],
+                        x=investor_df['tradingDate'],
                         y=cumulative_values,
                         mode='lines+markers',
                         name='Giá trị tích lũy',
@@ -2070,7 +2159,7 @@ elif main_menu == "Thị trường":
                     ), secondary_y=True)
                     
                     fig_tcnn.update_layout(
-                        title=f'Tổ chức nước ngoài Ròng - VN-Index ({investor_start_date.strftime("%Y-%m-%d")} đến {investor_end_date.strftime("%Y-%m-%d")})',
+                        title=f'Tổ chức nước ngoài Ròng - {symbol_investor} ({investor_frequency})',
                         xaxis_title='Thời gian',
                         yaxis_title='Giá trị ròng',
                         yaxis2_title='Giá trị tích lũy',
@@ -2082,13 +2171,120 @@ elif main_menu == "Thị trường":
                         bargap=0.15
                     )
                     
-                    fig_tcnn.update_xaxes(showgrid=False)
+                    fig_tcnn.update_xaxes(showgrid=False, rangebreaks=[dict(bounds=["sat", "mon"])])
                     fig_tcnn.update_yaxes(showgrid=False, secondary_y=False)
                     fig_tcnn.update_yaxes(showgrid=False, secondary_y=True)
                     
                     st.plotly_chart(fig_tcnn, width='stretch')
+                    
+                    # Hiển thị dữ liệu chi tiết
+                    with st.expander("📊 Xem dữ liệu chi tiết"):
+                        display_df = investor_df[['tradingDate', col_name]].copy()
+                        display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                        display_df = display_df.rename(columns={
+                            'tradingDate': 'Ngày',
+                            col_name: 'Giá trị ròng'
+                        })
+                        # Thêm cột tích lũy
+                        display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
                     st.warning("Không có dữ liệu Tổ chức nước ngoài ròng.")
+            else:
+                st.info("Đang tải dữ liệu...")
+        
+        # --- Khối ngoại Tab ---
+        with tab_khoi_ngoai:
+            st.subheader("📊 Giao dịch Khối ngoại Ròng")
+            
+            # Map to English column name
+            col_name = 'foreignNetValue'
+            display_label = 'Khối ngoại ròng'
+            
+            if inv_status == "completed" and investor_df is not None and not investor_df.empty:
+                if col_name in investor_df.columns:
+                    investor_df[col_name] = pd.to_numeric(investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
+                    
+                    # Convert tradingDate to datetime and sort by date
+                    investor_df['tradingDate'] = pd.to_datetime(investor_df['tradingDate'])
+                    investor_df = investor_df.sort_values('tradingDate').reset_index(drop=True)
+                    
+                    # Calculate cumulative value (fill NaN with 0 first to ensure correct cumsum)
+                    cumulative_values = investor_df[col_name].fillna(0).cumsum()
+                    
+                    # Create figure with secondary y-axis
+                    fig_khoi_ngoai = make_subplots(specs=[[{"secondary_y": True}]])
+                    
+                    # Add bar chart with conditional colors
+                    colors_kn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in investor_df[col_name]]
+                    
+                    bar_hover_kn = [
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Giá trị ròng: {investor_df[col_name].iloc[i]:,.0f}<br>" +
+                        f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
+                        for i in range(len(investor_df))
+                    ]
+                    
+                    fig_khoi_ngoai.add_trace(go.Bar(
+                        x=investor_df['tradingDate'],
+                        y=investor_df[col_name],
+                        name='Giá trị ròng',
+                        marker_color=colors_kn,
+                        opacity=0.85,
+                        text=bar_hover_kn,
+                        hoverinfo='text'
+                    ), secondary_y=False)
+                    
+                    # Add cumulative line
+                    line_hover_kn = [
+                        f"Ngày: {investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                        f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
+                        for i in range(len(investor_df))
+                    ]
+                    
+                    fig_khoi_ngoai.add_trace(go.Scatter(
+                        x=investor_df['tradingDate'],
+                        y=cumulative_values,
+                        mode='lines+markers',
+                        name='Giá trị tích lũy',
+                        line=dict(color='#3498db', width=2.5),
+                        marker=dict(size=4),
+                        text=line_hover_kn,
+                        hoverinfo='text'
+                    ), secondary_y=True)
+                    
+                    fig_khoi_ngoai.update_layout(
+                        title=f'Khối ngoại Ròng - {symbol_investor} ({investor_frequency})',
+                        xaxis_title='Thời gian',
+                        yaxis_title='Giá trị ròng',
+                        yaxis2_title='Giá trị tích lũy',
+                        height=500,
+                        hovermode='x unified',
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        margin=dict(l=60, r=60, t=80, b=60),
+                        bargap=0.15
+                    )
+                    
+                    fig_khoi_ngoai.update_xaxes(showgrid=False, rangebreaks=[dict(bounds=["sat", "mon"])])
+                    fig_khoi_ngoai.update_yaxes(showgrid=False, secondary_y=False)
+                    fig_khoi_ngoai.update_yaxes(showgrid=False, secondary_y=True)
+                    
+                    st.plotly_chart(fig_khoi_ngoai, width='stretch')
+                    
+                    # Hiển thị dữ liệu chi tiết
+                    with st.expander("📊 Xem dữ liệu chi tiết"):
+                        display_df = investor_df[['tradingDate', col_name]].copy()
+                        display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                        display_df = display_df.rename(columns={
+                            'tradingDate': 'Ngày',
+                            col_name: 'Giá trị ròng'
+                        })
+                        # Thêm cột tích lũy
+                        display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("Không có dữ liệu Khối ngoại ròng.")
             else:
                 st.info("Đang tải dữ liệu...")
 
@@ -3384,7 +3580,7 @@ elif main_menu == "Cổ phiếu":
         </style>
         """, unsafe_allow_html=True)
         
-        # Stock symbol input and period selection
+        # Stock symbol input and frequency selection
         input_col1, input_col2, input_col3 = st.columns([1, 2, 1])
         
         with input_col1:
@@ -3396,30 +3592,13 @@ elif main_menu == "Cổ phiếu":
             ).upper()
         
         with input_col2:
-            # Period selection
-            stock_period = st.selectbox(
-                "Chọn khoảng thời gian",
-                ["1 tháng", "3 tháng", "6 tháng", "1 năm", "Tùy chỉnh"],
-                index=2,
-                key="stock_period"
+            # Frequency selection (Daily/Weekly/Monthly)
+            stock_frequency = st.selectbox(
+                "Chọn tần suất",
+                ["Daily", "Weekly", "Monthly"],
+                index=0,
+                key="stock_frequency"
             )
-            
-            if stock_period == "Tùy chỉnh":
-                date_col1, date_col2 = st.columns(2)
-                with date_col1:
-                    stock_start_date = st.date_input(
-                        "Ngày bắt đầu",
-                        value=datetime.now().date() - timedelta(days=180),
-                        key="stock_start_date"
-                    )
-                with date_col2:
-                    stock_end_date = st.date_input(
-                        "Ngày kết thúc",
-                        value=datetime.now().date(),
-                        key="stock_end_date"
-                    )
-            else:
-                stock_start_date, stock_end_date = get_date_range(stock_period)
         
         with input_col3:
             st.caption(f"📅 {datetime.now().strftime('%d/%m/%Y')}")
@@ -3428,38 +3607,33 @@ elif main_menu == "Cổ phiếu":
         # Initialize session state for loaded symbol
         if "loaded_stock_symbol" not in st.session_state:
             st.session_state.loaded_stock_symbol = ""
-        if "loaded_stock_start_date" not in st.session_state:
-            st.session_state.loaded_stock_start_date = None
-        if "loaded_stock_end_date" not in st.session_state:
-            st.session_state.loaded_stock_end_date = None
+        if "loaded_stock_frequency" not in st.session_state:
+            st.session_state.loaded_stock_frequency = "Daily"
         
         # Handle load button click
         if load_button and stock_symbol:
             st.session_state.loaded_stock_symbol = stock_symbol
-            st.session_state.loaded_stock_start_date = stock_start_date
-            st.session_state.loaded_stock_end_date = stock_end_date
+            st.session_state.loaded_stock_frequency = stock_frequency
             
             # Create cache key based on parameters
-            stock_investor_key = f"stock_investor_{stock_symbol}_{stock_start_date}_{stock_end_date}"
+            stock_investor_key = f"stock_investor_{stock_symbol}_{stock_frequency}"
             
             # Load data
             if stock_investor_key not in st.session_state and stock_investor_key not in st.session_state.jobs:
                 st.session_state.jobs[stock_investor_key] = st.session_state.executor.submit(
                     investor_type,
                     symbol=stock_symbol,
-                    start_date=stock_start_date.strftime('%Y-%m-%d'),
-                    end_date=stock_end_date.strftime('%Y-%m-%d')
+                    frequency=stock_frequency
                 )
                 st.session_state[f"{stock_investor_key}_start_time"] = time.time()
         
         # Check if we have a loaded symbol
         if st.session_state.loaded_stock_symbol:
             current_symbol = st.session_state.loaded_stock_symbol
-            current_start = st.session_state.loaded_stock_start_date
-            current_end = st.session_state.loaded_stock_end_date
+            current_frequency = st.session_state.loaded_stock_frequency
             
             # Create cache key
-            stock_investor_key = f"stock_investor_{current_symbol}_{current_start}_{current_end}"
+            stock_investor_key = f"stock_investor_{current_symbol}_{current_frequency}"
             
             # Get job status
             stock_inv_status, stock_investor_df = get_job_status(stock_investor_key)
@@ -3467,17 +3641,17 @@ elif main_menu == "Cổ phiếu":
             stock_inv_status = "not_started"
             stock_investor_df = None
             current_symbol = ""
-            current_start = None
-            current_end = None
+            current_frequency = "Daily"
         
         # Create tabs for investor classification
-        tab_tong_gia_tri_cp, tab_tu_doanh_cp, tab_ca_nhan_trong_nuoc_cp, tab_to_chuc_trong_nuoc_cp, tab_ca_nhan_nuoc_ngoai_cp, tab_to_chuc_nuoc_ngoai_cp = st.tabs([
+        tab_tong_gia_tri_cp, tab_tu_doanh_cp, tab_ca_nhan_trong_nuoc_cp, tab_to_chuc_trong_nuoc_cp, tab_ca_nhan_nuoc_ngoai_cp, tab_to_chuc_nuoc_ngoai_cp, tab_khoi_ngoai_cp = st.tabs([
             "💰 Tổng giá trị", 
             "🏢 Tự doanh", 
             "👤 Cá nhân trong nước", 
             "🏛️ Tổ chức trong nước", 
             "🌍 Cá nhân nước ngoài", 
-            "🌐 Tổ chức nước ngoài"
+            "🌐 Tổ chức nước ngoài",
+            "📊 Khối ngoại"
         ])
         
         # --- Tổng giá trị Tab ---
@@ -3493,12 +3667,12 @@ elif main_menu == "Cổ phiếu":
                     st.error(f"Lỗi khi tải dữ liệu: {stock_investor_df}")
                 elif stock_inv_status == "completed" and stock_investor_df is not None and not stock_investor_df.empty:
                     try:
-                        # Get stock history for close price
+                        # Get stock history for close price (use frequency to determine period)
+                        period_map = {"Daily": "day", "Weekly": "week", "Monthly": "month"}
+                        stock_period = period_map.get(current_frequency, "day")
                         stock_price_df = get_stock_history(
                             symbol=current_symbol,
-                            period="day",
-                            end_date=current_end.strftime('%Y-%m-%d'),
-                            count_back=(current_end - current_start).days + 30
+                            period=stock_period
                         )
                         
                         # Create the chart
@@ -3510,20 +3684,23 @@ elif main_menu == "Cổ phiếu":
                         
                         # Define professional colors for each investor type
                         colors = {
-                            'Tự doanh ròng': '#e74c3c',
-                            'Cá nhân trong nước ròng': '#3498db',
-                            'Tổ chức trong nước ròng': '#2ecc71',
-                            'Cá nhân nước ngoài ròng': '#9b59b6',
-                            'Tổ chức nước ngoài ròng': '#f39c12'
+                            'proprietaryNetValue': '#e74c3c',
+                            'localIndividualNetValue': '#3498db',
+                            'localInstitutionalNetValue': '#2ecc71',
+                            'foreignIndividualNetValue': '#9b59b6',
+                            'foreignInstitutionalNetValue': '#f39c12'
                         }
+                        
+                        # Convert tradingDate to datetime for display
+                        stock_investor_df['tradingDate'] = pd.to_datetime(stock_investor_df['tradingDate'])
                         
                         # Add stacked bar traces for investor types
                         investor_columns = [
-                            'Tự doanh ròng',
-                            'Cá nhân trong nước ròng',
-                            'Tổ chức trong nước ròng',
-                            'Cá nhân nước ngoài ròng',
-                            'Tổ chức nước ngoài ròng'
+                            'proprietaryNetValue',
+                            'localIndividualNetValue',
+                            'localInstitutionalNetValue',
+                            'foreignIndividualNetValue',
+                            'foreignInstitutionalNetValue'
                         ]
                         
                         for col in investor_columns:
@@ -3531,13 +3708,13 @@ elif main_menu == "Cổ phiếu":
                                 stock_investor_df[col] = pd.to_numeric(stock_investor_df[col].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                                 
                                 bar_hover = [
-                                    f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                                    f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                                     f"{col}: {stock_investor_df[col].iloc[i]:,.0f}"
                                     for i in range(len(stock_investor_df))
                                 ]
                                 
                                 fig_stock_inv.add_trace(go.Bar(
-                                    x=stock_investor_df['Ngày'],
+                                    x=stock_investor_df['tradingDate'],
                                     y=stock_investor_df[col],
                                     name=col,
                                     marker_color=colors.get(col, '#888888'),
@@ -3549,11 +3726,14 @@ elif main_menu == "Cổ phiếu":
                         # Add close price line if stock data is available
                         if stock_price_df is not None and not stock_price_df.empty:
                             stock_price_df['time'] = pd.to_datetime(stock_price_df['time'])
-                            start_datetime = pd.to_datetime(current_start)
-                            end_datetime = pd.to_datetime(current_end)
+                            
+                            # Filter price data to match investor data date range
+                            investor_dates = stock_investor_df['tradingDate']
+                            min_date = investor_dates.min()
+                            max_date = investor_dates.max()
                             stock_price_df_filtered = stock_price_df[
-                                (stock_price_df['time'] >= start_datetime) & 
-                                (stock_price_df['time'] <= end_datetime)
+                                (stock_price_df['time'] >= min_date) & 
+                                (stock_price_df['time'] <= max_date)
                             ]
                             
                             if not stock_price_df_filtered.empty:
@@ -3602,7 +3782,7 @@ elif main_menu == "Cổ phiếu":
                         )
                         
                         fig_stock_inv.update_xaxes(showgrid=False, zeroline=False)
-                        fig_stock_inv.update_yaxes(showgrid=True, gridcolor='rgba(128,128,128,0.2)', secondary_y=False)
+                        fig_stock_inv.update_yaxes(showgrid=False, secondary_y=False)
                         fig_stock_inv.update_yaxes(showgrid=False, secondary_y=True)
                         
                         st.plotly_chart(fig_stock_inv, width='stretch')
@@ -3612,7 +3792,7 @@ elif main_menu == "Cổ phiếu":
                             st.download_button(
                                 "Tải xuống dữ liệu CSV",
                                 stock_investor_df.to_csv(index=False),
-                                f"investor_type_{current_symbol}_{current_start.strftime('%Y%m%d')}_{current_end.strftime('%Y%m%d')}.csv",
+                                f"investor_type_{current_symbol}_{current_frequency}.csv",
                                 "text/csv"
                             )
                     
@@ -3629,23 +3809,28 @@ elif main_menu == "Cổ phiếu":
                 st.subheader(f"🏢 Giao dịch Tự doanh Ròng - {current_symbol}")
                 
                 if stock_inv_status == "completed" and stock_investor_df is not None and not stock_investor_df.empty:
-                    col_name = 'Tự doanh ròng'
+                    col_name = 'proprietaryNetValue'
                     if col_name in stock_investor_df.columns:
                         stock_investor_df[col_name] = pd.to_numeric(stock_investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                         
-                        cumulative_values = stock_investor_df[col_name].cumsum()
+                        # Convert tradingDate to datetime and sort by date
+                        stock_investor_df['tradingDate'] = pd.to_datetime(stock_investor_df['tradingDate'])
+                        stock_investor_df = stock_investor_df.sort_values('tradingDate').reset_index(drop=True)
+                        
+                        # Calculate cumulative value (fill NaN with 0 first)
+                        cumulative_values = stock_investor_df[col_name].fillna(0).cumsum()
                         fig_td_cp = make_subplots(specs=[[{"secondary_y": True}]])
                         colors_td = ['#2ecc71' if v >= 0 else '#e74c3c' for v in stock_investor_df[col_name]]
                         
                         bar_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị ròng: {stock_investor_df[col_name].iloc[i]:,.0f}<br>" +
                             f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_td_cp.add_trace(go.Bar(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=stock_investor_df[col_name],
                             name='Giá trị ròng',
                             marker_color=colors_td,
@@ -3655,13 +3840,13 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=False)
                         
                         line_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_td_cp.add_trace(go.Scatter(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=cumulative_values,
                             mode='lines+markers',
                             name='Giá trị tích lũy',
@@ -3672,7 +3857,7 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=True)
                         
                         fig_td_cp.update_layout(
-                            title=f'Tự doanh Ròng - {current_symbol} ({current_start.strftime("%Y-%m-%d")} đến {current_end.strftime("%Y-%m-%d")})',
+                            title=f'Tự doanh Ròng - {current_symbol} ({current_frequency})',
                             xaxis_title='Thời gian',
                             yaxis_title='Giá trị ròng',
                             yaxis2_title='Giá trị tích lũy',
@@ -3689,6 +3874,18 @@ elif main_menu == "Cổ phiếu":
                         fig_td_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
                         st.plotly_chart(fig_td_cp, width='stretch')
+                        
+                        # Hiển thị dữ liệu chi tiết
+                        with st.expander("📊 Xem dữ liệu chi tiết"):
+                            display_df = stock_investor_df[['tradingDate', col_name]].copy()
+                            display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                            display_df = display_df.rename(columns={
+                                'tradingDate': 'Ngày',
+                                col_name: 'Giá trị ròng'
+                            })
+                            # Thêm cột tích lũy
+                            display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
                     else:
                         st.warning("Không có dữ liệu Tự doanh ròng.")
                 else:
@@ -3702,23 +3899,28 @@ elif main_menu == "Cổ phiếu":
                 st.subheader(f"👤 Giao dịch Cá nhân trong nước Ròng - {current_symbol}")
                 
                 if stock_inv_status == "completed" and stock_investor_df is not None and not stock_investor_df.empty:
-                    col_name = 'Cá nhân trong nước ròng'
+                    col_name = 'localIndividualNetValue'
                     if col_name in stock_investor_df.columns:
                         stock_investor_df[col_name] = pd.to_numeric(stock_investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                         
-                        cumulative_values = stock_investor_df[col_name].cumsum()
+                        # Convert Ngày to datetime and sort by date
+                        stock_investor_df['tradingDate'] = pd.to_datetime(stock_investor_df['tradingDate'])
+                        stock_investor_df = stock_investor_df.sort_values('tradingDate').reset_index(drop=True)
+                        
+                        # Calculate cumulative value
+                        cumulative_values = stock_investor_df[col_name].fillna(0).cumsum()
                         fig_cntn_cp = make_subplots(specs=[[{"secondary_y": True}]])
                         colors_cntn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in stock_investor_df[col_name]]
                         
                         bar_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị ròng: {stock_investor_df[col_name].iloc[i]:,.0f}<br>" +
                             f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_cntn_cp.add_trace(go.Bar(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=stock_investor_df[col_name],
                             name='Giá trị ròng',
                             marker_color=colors_cntn,
@@ -3728,13 +3930,13 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=False)
                         
                         line_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_cntn_cp.add_trace(go.Scatter(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=cumulative_values,
                             mode='lines+markers',
                             name='Giá trị tích lũy',
@@ -3745,7 +3947,7 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=True)
                         
                         fig_cntn_cp.update_layout(
-                            title=f'Cá nhân trong nước Ròng - {current_symbol} ({current_start.strftime("%Y-%m-%d")} đến {current_end.strftime("%Y-%m-%d")})',
+                            title=f'Cá nhân trong nước Ròng - {current_symbol} ({current_frequency})',
                             xaxis_title='Thời gian',
                             yaxis_title='Giá trị ròng',
                             yaxis2_title='Giá trị tích lũy',
@@ -3762,6 +3964,18 @@ elif main_menu == "Cổ phiếu":
                         fig_cntn_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
                         st.plotly_chart(fig_cntn_cp, width='stretch')
+                        
+                        # Hiển thị dữ liệu chi tiết
+                        with st.expander("📊 Xem dữ liệu chi tiết"):
+                            display_df = stock_investor_df[['tradingDate', col_name]].copy()
+                            display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                            display_df = display_df.rename(columns={
+                                'tradingDate': 'Ngày',
+                                col_name: 'Giá trị ròng'
+                            })
+                            # Thêm cột tích lũy
+                            display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
                     else:
                         st.warning("Không có dữ liệu Cá nhân trong nước ròng.")
                 else:
@@ -3775,23 +3989,28 @@ elif main_menu == "Cổ phiếu":
                 st.subheader(f"🏛️ Giao dịch Tổ chức trong nước Ròng - {current_symbol}")
                 
                 if stock_inv_status == "completed" and stock_investor_df is not None and not stock_investor_df.empty:
-                    col_name = 'Tổ chức trong nước ròng'
+                    col_name = 'localInstitutionalNetValue'
                     if col_name in stock_investor_df.columns:
                         stock_investor_df[col_name] = pd.to_numeric(stock_investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                         
-                        cumulative_values = stock_investor_df[col_name].cumsum()
+                        # Convert Ngày to datetime and sort by date
+                        stock_investor_df['tradingDate'] = pd.to_datetime(stock_investor_df['tradingDate'])
+                        stock_investor_df = stock_investor_df.sort_values('tradingDate').reset_index(drop=True)
+                        
+                        # Calculate cumulative value
+                        cumulative_values = stock_investor_df[col_name].fillna(0).cumsum()
                         fig_tctn_cp = make_subplots(specs=[[{"secondary_y": True}]])
                         colors_tctn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in stock_investor_df[col_name]]
                         
                         bar_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị ròng: {stock_investor_df[col_name].iloc[i]:,.0f}<br>" +
                             f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_tctn_cp.add_trace(go.Bar(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=stock_investor_df[col_name],
                             name='Giá trị ròng',
                             marker_color=colors_tctn,
@@ -3801,13 +4020,13 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=False)
                         
                         line_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_tctn_cp.add_trace(go.Scatter(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=cumulative_values,
                             mode='lines+markers',
                             name='Giá trị tích lũy',
@@ -3818,7 +4037,7 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=True)
                         
                         fig_tctn_cp.update_layout(
-                            title=f'Tổ chức trong nước Ròng - {current_symbol} ({current_start.strftime("%Y-%m-%d")} đến {current_end.strftime("%Y-%m-%d")})',
+                            title=f'Tổ chức trong nước Ròng - {current_symbol} ({current_frequency})',
                             xaxis_title='Thời gian',
                             yaxis_title='Giá trị ròng',
                             yaxis2_title='Giá trị tích lũy',
@@ -3835,6 +4054,18 @@ elif main_menu == "Cổ phiếu":
                         fig_tctn_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
                         st.plotly_chart(fig_tctn_cp, width='stretch')
+                        
+                        # Hiển thị dữ liệu chi tiết
+                        with st.expander("📊 Xem dữ liệu chi tiết"):
+                            display_df = stock_investor_df[['tradingDate', col_name]].copy()
+                            display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                            display_df = display_df.rename(columns={
+                                'tradingDate': 'Ngày',
+                                col_name: 'Giá trị ròng'
+                            })
+                            # Thêm cột tích lũy
+                            display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
                     else:
                         st.warning("Không có dữ liệu Tổ chức trong nước ròng.")
                 else:
@@ -3848,23 +4079,28 @@ elif main_menu == "Cổ phiếu":
                 st.subheader(f"🌍 Giao dịch Cá nhân nước ngoài Ròng - {current_symbol}")
                 
                 if stock_inv_status == "completed" and stock_investor_df is not None and not stock_investor_df.empty:
-                    col_name = 'Cá nhân nước ngoài ròng'
+                    col_name = 'foreignIndividualNetValue'
                     if col_name in stock_investor_df.columns:
                         stock_investor_df[col_name] = pd.to_numeric(stock_investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                         
-                        cumulative_values = stock_investor_df[col_name].cumsum()
+                        # Convert Ngày to datetime and sort by date
+                        stock_investor_df['tradingDate'] = pd.to_datetime(stock_investor_df['tradingDate'])
+                        stock_investor_df = stock_investor_df.sort_values('tradingDate').reset_index(drop=True)
+                        
+                        # Calculate cumulative value
+                        cumulative_values = stock_investor_df[col_name].fillna(0).cumsum()
                         fig_cnnn_cp = make_subplots(specs=[[{"secondary_y": True}]])
                         colors_cnnn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in stock_investor_df[col_name]]
                         
                         bar_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị ròng: {stock_investor_df[col_name].iloc[i]:,.0f}<br>" +
                             f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_cnnn_cp.add_trace(go.Bar(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=stock_investor_df[col_name],
                             name='Giá trị ròng',
                             marker_color=colors_cnnn,
@@ -3874,13 +4110,13 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=False)
                         
                         line_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_cnnn_cp.add_trace(go.Scatter(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=cumulative_values,
                             mode='lines+markers',
                             name='Giá trị tích lũy',
@@ -3891,7 +4127,7 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=True)
                         
                         fig_cnnn_cp.update_layout(
-                            title=f'Cá nhân nước ngoài Ròng - {current_symbol} ({current_start.strftime("%Y-%m-%d")} đến {current_end.strftime("%Y-%m-%d")})',
+                            title=f'Cá nhân nước ngoài Ròng - {current_symbol} ({current_frequency})',
                             xaxis_title='Thời gian',
                             yaxis_title='Giá trị ròng',
                             yaxis2_title='Giá trị tích lũy',
@@ -3908,6 +4144,18 @@ elif main_menu == "Cổ phiếu":
                         fig_cnnn_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
                         st.plotly_chart(fig_cnnn_cp, width='stretch')
+                        
+                        # Hiển thị dữ liệu chi tiết
+                        with st.expander("📊 Xem dữ liệu chi tiết"):
+                            display_df = stock_investor_df[['tradingDate', col_name]].copy()
+                            display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                            display_df = display_df.rename(columns={
+                                'tradingDate': 'Ngày',
+                                col_name: 'Giá trị ròng'
+                            })
+                            # Thêm cột tích lũy
+                            display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
                     else:
                         st.warning("Không có dữ liệu Cá nhân nước ngoài ròng.")
                 else:
@@ -3921,23 +4169,28 @@ elif main_menu == "Cổ phiếu":
                 st.subheader(f"🌐 Giao dịch Tổ chức nước ngoài Ròng - {current_symbol}")
                 
                 if stock_inv_status == "completed" and stock_investor_df is not None and not stock_investor_df.empty:
-                    col_name = 'Tổ chức nước ngoài ròng'
+                    col_name = 'foreignInstitutionalNetValue'
                     if col_name in stock_investor_df.columns:
                         stock_investor_df[col_name] = pd.to_numeric(stock_investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
                         
-                        cumulative_values = stock_investor_df[col_name].cumsum()
+                        # Convert Ngày to datetime and sort by date
+                        stock_investor_df['tradingDate'] = pd.to_datetime(stock_investor_df['tradingDate'])
+                        stock_investor_df = stock_investor_df.sort_values('tradingDate').reset_index(drop=True)
+                        
+                        # Calculate cumulative value
+                        cumulative_values = stock_investor_df[col_name].fillna(0).cumsum()
                         fig_tcnn_cp = make_subplots(specs=[[{"secondary_y": True}]])
                         colors_tcnn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in stock_investor_df[col_name]]
                         
                         bar_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị ròng: {stock_investor_df[col_name].iloc[i]:,.0f}<br>" +
                             f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_tcnn_cp.add_trace(go.Bar(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=stock_investor_df[col_name],
                             name='Giá trị ròng',
                             marker_color=colors_tcnn,
@@ -3947,13 +4200,13 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=False)
                         
                         line_hover = [
-                            f"Ngày: {stock_investor_df['Ngày'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
                             f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
                             for i in range(len(stock_investor_df))
                         ]
                         
                         fig_tcnn_cp.add_trace(go.Scatter(
-                            x=stock_investor_df['Ngày'],
+                            x=stock_investor_df['tradingDate'],
                             y=cumulative_values,
                             mode='lines+markers',
                             name='Giá trị tích lũy',
@@ -3964,7 +4217,7 @@ elif main_menu == "Cổ phiếu":
                         ), secondary_y=True)
                         
                         fig_tcnn_cp.update_layout(
-                            title=f'Tổ chức nước ngoài Ròng - {current_symbol} ({current_start.strftime("%Y-%m-%d")} đến {current_end.strftime("%Y-%m-%d")})',
+                            title=f'Tổ chức nước ngoài Ròng - {current_symbol} ({current_frequency})',
                             xaxis_title='Thời gian',
                             yaxis_title='Giá trị ròng',
                             yaxis2_title='Giá trị tích lũy',
@@ -3981,8 +4234,110 @@ elif main_menu == "Cổ phiếu":
                         fig_tcnn_cp.update_yaxes(showgrid=False, secondary_y=True)
                         
                         st.plotly_chart(fig_tcnn_cp, width='stretch')
+                        
+                        # Hiển thị dữ liệu chi tiết
+                        with st.expander("📊 Xem dữ liệu chi tiết"):
+                            display_df = stock_investor_df[['tradingDate', col_name]].copy()
+                            display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                            display_df = display_df.rename(columns={
+                                'tradingDate': 'Ngày',
+                                col_name: 'Giá trị ròng'
+                            })
+                            # Thêm cột tích lũy
+                            display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
                     else:
                         st.warning("Không có dữ liệu Tổ chức nước ngoài ròng.")
+                else:
+                    st.info("Đang tải dữ liệu...")
+        
+        # --- Khối ngoại Tab ---
+        with tab_khoi_ngoai_cp:
+            if not current_symbol:
+                st.info("👈 Vui lòng nhập mã cổ phiếu và nhấn nút 'Tải dữ liệu' để xem biểu đồ.")
+            else:
+                st.subheader(f"📊 Giao dịch Khối ngoại Ròng - {current_symbol}")
+                
+                if stock_inv_status == "completed" and stock_investor_df is not None and not stock_investor_df.empty:
+                    col_name = 'foreignNetValue'
+                    if col_name in stock_investor_df.columns:
+                        stock_investor_df[col_name] = pd.to_numeric(stock_investor_df[col_name].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce')
+                        
+                        # Convert Ngày to datetime and sort by date
+                        stock_investor_df['tradingDate'] = pd.to_datetime(stock_investor_df['tradingDate'])
+                        stock_investor_df = stock_investor_df.sort_values('tradingDate').reset_index(drop=True)
+                        
+                        # Calculate cumulative value
+                        cumulative_values = stock_investor_df[col_name].fillna(0).cumsum()
+                        fig_kn_cp = make_subplots(specs=[[{"secondary_y": True}]])
+                        colors_kn = ['#2ecc71' if v >= 0 else '#e74c3c' for v in stock_investor_df[col_name]]
+                        
+                        bar_hover_kn = [
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Giá trị ròng: {stock_investor_df[col_name].iloc[i]:,.0f}<br>" +
+                            f"Tích lũy: {cumulative_values.iloc[i]:,.0f}"
+                            for i in range(len(stock_investor_df))
+                        ]
+                        
+                        fig_kn_cp.add_trace(go.Bar(
+                            x=stock_investor_df['tradingDate'],
+                            y=stock_investor_df[col_name],
+                            name='Giá trị ròng',
+                            marker_color=colors_kn,
+                            opacity=0.85,
+                            text=bar_hover_kn,
+                            hoverinfo='text'
+                        ), secondary_y=False)
+                        
+                        line_hover_kn = [
+                            f"Ngày: {stock_investor_df['tradingDate'].iloc[i].strftime('%Y-%m-%d')}<br>" +
+                            f"Giá trị tích lũy: {cumulative_values.iloc[i]:,.0f}"
+                            for i in range(len(stock_investor_df))
+                        ]
+                        
+                        fig_kn_cp.add_trace(go.Scatter(
+                            x=stock_investor_df['tradingDate'],
+                            y=cumulative_values,
+                            mode='lines+markers',
+                            name='Giá trị tích lũy',
+                            line=dict(color='#3498db', width=2.5),
+                            marker=dict(size=4),
+                            text=line_hover_kn,
+                            hoverinfo='text'
+                        ), secondary_y=True)
+                        
+                        fig_kn_cp.update_layout(
+                            title=f'Khối ngoại Ròng - {current_symbol} ({current_frequency})',
+                            xaxis_title='Thời gian',
+                            yaxis_title='Giá trị ròng',
+                            yaxis2_title='Giá trị tích lũy',
+                            height=500,
+                            hovermode='x unified',
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            margin=dict(l=60, r=60, t=80, b=60),
+                            bargap=0.15
+                        )
+                        
+                        fig_kn_cp.update_xaxes(showgrid=False, rangebreaks=[dict(bounds=["sat", "mon"])])
+                        fig_kn_cp.update_yaxes(showgrid=False, secondary_y=False)
+                        fig_kn_cp.update_yaxes(showgrid=False, secondary_y=True)
+                        
+                        st.plotly_chart(fig_kn_cp, width='stretch')
+                        
+                        # Hiển thị dữ liệu chi tiết
+                        with st.expander("📊 Xem dữ liệu chi tiết"):
+                            display_df = stock_investor_df[['tradingDate', col_name]].copy()
+                            display_df['tradingDate'] = display_df['tradingDate'].dt.strftime('%Y-%m-%d')
+                            display_df = display_df.rename(columns={
+                                'tradingDate': 'Ngày',
+                                col_name: 'Giá trị ròng'
+                            })
+                            # Thêm cột tích lũy
+                            display_df['Giá trị tích lũy'] = display_df['Giá trị ròng'].fillna(0).cumsum()
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.warning("Không có dữ liệu Khối ngoại ròng.")
                 else:
                     st.info("Đang tải dữ liệu...")
     

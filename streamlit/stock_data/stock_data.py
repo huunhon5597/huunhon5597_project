@@ -254,26 +254,23 @@ def get_stock_symbols(exchange='HOSE'):
         cache_entry = _symbols_cache_dict.get(exchange)
         return cache_entry['symbols'] if cache_entry else []
 
-def investor_type(symbol='VN-Index', start_date=None, end_date=None):
+def investor_type(symbol="VNINDEX", frequency="Daily"):
     """
-    Hàm lấy dữ liệu phân loại nhà đầu tư từ nguoiquansat.vn
-    
-    Parameters:
-    - symbol (str): Mã chứng khoán, mặc định là 'VN-Index' (sàn khác: HNX-Index, UPCOM-Index)
-    - start_date (str): Ngày bắt đầu (định dạng yyyy-mm-dd)
-    - end_date (str): Ngày kết thúc (định dạng yyyy-mm-dd), mặc định là ngày hiện tại
+    Lấy dữ liệu giao dịch theo loại nhà đầu tư từ FiinTrade.
+
+    Parameters
+    ----------
+    symbol : str, default "VNINDEX"
+        Mã chứng khoán (VNINDEX, HNXINDEX, UPCOMINDEX)
+    frequency : str, default "Daily"
+        Có thể là "Weekly" hoặc "Monthly"
     
     Returns:
-    - DataFrame: DataFrame chứa dữ liệu phân loại nhà đầu tư đã được xử lý
+    --------
+    pd.DataFrame: DataFrame chứa dữ liệu giao dịch theo loại nhà đầu tư
     """
-    import datetime
-    
-    # Xử lý ngày kết thúc
-    if end_date is None:
-        end_date = datetime.date.today().strftime('%Y-%m-%d')
-    
     # Create cache key
-    cache_key = f"{symbol}_{start_date}_{end_date}"
+    cache_key = f"{symbol}_{frequency}"
     
     # Check cache
     current_time = time.time()
@@ -282,68 +279,61 @@ def investor_type(symbol='VN-Index', start_date=None, end_date=None):
         if cache_age < _INVESTOR_TYPE_CACHE_TTL:
             return _investor_type_cache[cache_key].copy()
     
-    # Định dạng lại ngày cho URL
-    start_date_formatted = datetime.datetime.strptime(start_date, '%Y-%m-%d').date().strftime('%d/%m/%Y')
-    end_date_formatted = datetime.datetime.strptime(end_date, '%Y-%m-%d').date().strftime('%d/%m/%Y')
+    url = f"https://wlgw-market.fiintrade.vn/MoneyFlow/GetStatisticInvestorChart?language=vi&Code={symbol}&Frequently={frequency}"
+    headers = {
+        'accept': 'application/json, text/plain, */*',
+        'origin': 'https://app-kafi.fiintrade.vn',
+        'referer': 'https://app-kafi.fiintrade.vn/',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 OPR/127.0.0.0'
+    }
+
+    session = _get_session()
+    response = session.get(url, headers=headers, timeout=15)
     
-    # Khởi tạo dataframe rỗng
-    all_data = pd.DataFrame()
-    page = 1
-    
-    while True:
-        # Tạo URL với số trang hiện tại
-        url = f'https://dulieu.nguoiquansat.vn/History/PhanLoaiNDTHistory?page={page}&fromDate={start_date_formatted}&toDate={end_date_formatted}&exId=&code={symbol}&idNganh=&_=1769924091168'
-        
-        try:
-            # Đọc dữ liệu từ URL
-            table = pd.read_html(url, encoding='utf-8')
-            df = pd.DataFrame(table[0])
-            
-            # Kiểm tra nếu dataframe rỗng thì thoát vòng lặp
-            if df.empty:
-                break
-            
-            # Ghép dataframe mới vào dataframe tổng
-            all_data = pd.concat([all_data, df], ignore_index=True)
-            
-            # Tăng số trang lên
-            page += 1
-            
-        except Exception as e:
-            print(f"Lỗi khi lấy dữ liệu từ trang {page}: {e}")
-            break
-    
-    # Kiểm tra nếu không có dữ liệu
-    if all_data.empty:
+    if response.status_code != 200:
+        print(f"Error: {response.status_code}")
         return pd.DataFrame()
     
-    # Xử lý dataframe
-    # 1. Xóa các cột có level 1 là 'GTGD khớp lệnh'
-    if isinstance(all_data.columns, pd.MultiIndex):
-        cols_to_drop = [col for col in all_data.columns if col[1] == 'GTGD khớp lệnh']
-        all_data = all_data.drop(columns=cols_to_drop)
+    try:
+        json_data = response.json()
+        if 'items' not in json_data:
+            print("Error: Invalid response format")
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(json_data['items'])
         
-        # 2. Xử lý multi-level index columns
-        all_data.columns = [
-            col[0] if col[0] == col[1] else f"{col[0]} {col[1]}"
-            for col in all_data.columns
+        if df.empty:
+            return pd.DataFrame()
+        
+        cols = ['code', 'tradingDate', 'closeValue', 'foreignBuyValue', 'foreignSellValue',
+                'proprietaryTotalBuyTradeValue', 'proprietaryTotalSellTradeValue',
+                'localIndividualBuyValue', 'localIndividualSellValue',
+                'localInstitutionalBuyValue', 'localInstitutionalSellValue',
+                'foreignIndividualBuyTradingValue', 'foreignIndividualSellTradingValue',
+                'foreignInstitutionalBuyTradingValue', 'foreignInstitutionalSellTradingValue']
+        df = df[cols]
+
+        # Calculate NetValue for each investor type
+        pairs = [
+            ('foreignBuyValue', 'foreignSellValue', 'foreignNetValue'),
+            ('proprietaryTotalBuyTradeValue', 'proprietaryTotalSellTradeValue', 'proprietaryNetValue'),
+            ('localIndividualBuyValue', 'localIndividualSellValue', 'localIndividualNetValue'),
+            ('localInstitutionalBuyValue', 'localInstitutionalSellValue', 'localInstitutionalNetValue'),
+            ('foreignIndividualBuyTradingValue', 'foreignIndividualSellTradingValue', 'foreignIndividualNetValue'),
+            ('foreignInstitutionalBuyTradingValue', 'foreignInstitutionalSellTradingValue', 'foreignInstitutionalNetValue'),
         ]
-    
-    # 3. Bỏ cột 'STT'
-    if 'STT' in all_data.columns:
-        all_data = all_data.drop(columns=['STT'])
-    
-    # 4. Xóa đoạn chữ 'Tổng GTGD' khỏi tên các cột
-    all_data.columns = all_data.columns.str.replace('Tổng GTGD', '', regex=False)
-    all_data.columns = all_data.columns.str.strip()
-    
-    # 5. Chuyển đổi cột 'Ngày' sang định dạng datetime và sắp xếp
-    all_data['Ngày'] = pd.to_datetime(all_data['Ngày'], format='%d/%m/%Y')
-    all_data = all_data.sort_values('Ngày')
-    all_data = all_data.reset_index(drop=True)
-    
-    # Store in cache
-    _investor_type_cache[cache_key] = all_data.copy()
-    _investor_type_cache_timestamps[cache_key] = time.time()
-    
-    return all_data
+        for buy_col, sell_col, net_col in pairs:
+            df[net_col] = df[buy_col] - df[sell_col]
+        
+        # Drop Buy and Sell columns, keep only NetValue columns
+        buy_sell_cols = [col for col in df.columns if 'Buy' in col or 'Sell' in col]
+        df = df.drop(columns=buy_sell_cols)
+        
+        # Store in cache
+        _investor_type_cache[cache_key] = df.copy()
+        _investor_type_cache_timestamps[cache_key] = time.time()
+        
+        return df
+    except Exception as e:
+        print(f"Error parsing response: {e}")
+        return pd.DataFrame()
