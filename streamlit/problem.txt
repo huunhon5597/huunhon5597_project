@@ -3,16 +3,7 @@ Lấy token cho cookie
 
 
 ***Streamlit app
-Tải dữ liệu nhanh hơn
-Phân loại nhà đầu tư uy tín hơn
-Các nút hành động nhanh
 Tích hợp AI
 Annotate trên biểu đồ
+Đang ở submenu của menu nào thì nút hành động cũng tô viền
 Cập nhật tin tức
-**Phân loại nhà đầu tư
-- Biểu đồ tần suất daily: thể hiện từ tháng 3 2025
-- Không có dữ liệu cho các tabs còn lại.
-Grid
-
-
-À, khi tôi lần đầu vào app dashboard, khi tôi vào bất kỳ một menu nào, sẽ đều có thông báo "The widget with key "main_menu" was created with a default value but also had its value set via the Session State API." Hãy giải thích giúp tôi vì sao và nếu không cần thiết, hãy bỏ thông báo này.
