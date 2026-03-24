@@ -1,0 +1,9 @@
+[server]
+enableXsrfProtection = true
+
+[secrets]
+# Streamlit Cloud Secrets
+# Add these secrets in Streamlit Cloud dashboard:
+# sstock_cookies = "your_cookie_string_here"
+# sstock_email = "your_email"
+# sstock_password = "your_password"

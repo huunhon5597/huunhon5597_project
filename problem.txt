@@ -1,0 +1,10 @@
+***General
+Lấy token cho cookie
+
+
+***Streamlit app
+Tích hợp AI
+Annotate trên biểu đồ
+Cập nhật tin tức
+
+

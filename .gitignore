@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# Environment
+.env
+.env.*
+
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cookies (uncomment if you don't want to commit cookies)
+# sstock_cookie.txt
+
+# Logs
+*.log
