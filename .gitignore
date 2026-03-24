@@ -31,3 +31,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Sensitive files
+auth/vci_token.py
