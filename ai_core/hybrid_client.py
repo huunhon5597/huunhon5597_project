@@ -135,10 +135,20 @@ def extract_symbols_from_query(query: str) -> list:
 
 def determine_tools_needed(query: str, symbols: list) -> list:
     """Determine which tools to call based on query and symbols."""
-    query_lower = query.lower()
+    query_lower = query.lower().strip()
     tools_to_call = []
     
-    has_market = any(word in query_lower for word in ["thị trường", "market", "tổng quan", "chung"])
+    # Check for simple greeting - don't call any tools
+    simple_greetings = ["hello", "hi", "hey", "chào", "xin chào", "ôi", "alo", "hi there", "xin chao"]
+    if query_lower in simple_greetings or query_lower.startswith("hello") or query_lower.startswith("hi ") or query_lower.startswith("chào") or query_lower.startswith("xin chào"):
+        return []  # No tools needed for greeting
+    
+    # Check for thank you / goodbye - don't call tools
+    polite_words = ["cảm ơn", "thanks", "thank", "tạm biệt", "bye", "goodbye", "see you"]
+    if any(word in query_lower for word in polite_words) and len(query_lower) < 30:
+        return []
+    
+    has_market = any(word in query_lower for word in ["thị trường", "market", "tổng quan", "chung", "vnindex"])
     has_sentiment = any(word in query_lower for word in ["tâm lý", "sentiment", "xu hướng"])
     has_investor = any(word in query_lower for word in ["nhà đầu tư", "dòng tiền", "investor", "mua", "bán"])
     has_valuation = any(word in query_lower for word in ["định giá", "p/e", "p/b", "valuation"])
@@ -206,27 +216,30 @@ def synthesize_with_llm(query: str, tool_results: str) -> str:
     if not client:
         return tool_results + "\n\n⚠️ Không có LLM available để tổng hợp. Đây là kết quả trực tiếp từ tools."
     
-    synthesis_prompt = f"""Bạn là chuyên gia phân tích chứng khoán Việt Nam.
+    synthesis_prompt = f"""Bạn là một chuyên gia phân tích chứng khoán đang tư vấn trực tiếp cho khách hàng qua chat.
 
-Dưới đây là KẾT QUẢ PHÂN TÍCH từ các công cụ dữ liệu:
+Dưới đây là DỮ LIỆU PHÂN TÍCH từ hệ thống:
 ---
 {tool_results}
 ---
 
-Câu hỏi của user: {query}
+User hỏi: {query}
 
-NHIỆM VỤ:
-1. Đọc và hiểu kết quả từ các công cụ
-2. Tổng hợp thành báo cáo phân tích mạch lạc, dễ đọc
-3. Thêm KIẾN THỨC BÊN NGOÀI về:
-   - Bối cảnh kinh tế vĩ mô hiện tại (lãi suất, tỷ giá, lạm phát)
-   - Xu hướng ngành nếu có
-   - Các yếu tố cần lưu ý
-4. Đưa ra NHẬN ĐỊNH và khuyến nghị (nếu phù hợp)
+NHIỆM VỤ VIẾT:
+1. Đọc dữ liệu trên và phân tích ngắn gọn cho user
+2. Viết NHƯ CON NGƯỜI - không phải robot hay báo cáo formal
+3. Dùng ngôn ngữ tự nhiên, có thể dùng emoji nhẹ 📈📉
+4. Có thể thêm 1-2 câu về bối cảnh kinh tế nếu thấy phù hợp
+5. Nếu user hỏi về cổ phiếu cụ thể → tập trung vào cổ phiếu đó
+6. Nếu user hỏi về thị trường → tập trung vào xu hướng chung
 
-Lưu ý quan trọng:
+Lưu ý:
 - KHÔNG bịa đặt số liệu - chỉ dùng data từ kết quả tools
-- Trả lời bằng tiếng Việt, dùng Markdown để format
+- Viết ngắn gọn, đi thẳng vào vấn đề
+- Trả lời tiếng Việt, KHÔNG dùng quá nhiều Markdown (chỉ dùng bold/italic nếu cần)
+- KHÔNG liệt kê bullet quá nhiều - viết thành đoạn văn tự nhiên"""
+
+    try:
 - Nếu thiếu dữ liệu, nói rõ "Không có đủ dữ liệu để phân tích"
 - Kết quả phải TỰ NHIÊN như con người viết, KHÔNG phải dạng JSON/tool response"""
 
@@ -235,15 +248,15 @@ Lưu ý quan trọng:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": synthesis_prompt}],
-                max_tokens=4096,
-                temperature=0.7
+                max_tokens=2048,
+                temperature=0.8
             )
             return response.choices[0].message.content
         else:  # HuggingFace client
             response = client.chat_completion(
                 messages=[{"role": "user", "content": synthesis_prompt}],
-                max_tokens=4096,
-                temperature=0.7
+                max_tokens=2048,
+                temperature=0.8
             )
             return response.choices[0].message.content or "Không có phản hồi từ LLM"
     except Exception as e:
@@ -270,6 +283,10 @@ def chat_hybrid(query: str) -> dict:
         tools_to_call = determine_tools_needed(query, symbols)
         tools_used = [f"{tool}({args})" for tool, args in tools_to_call]
         
+        # If no tools needed (e.g., greeting), just respond naturally
+        if not tools_to_call:
+            return respond_naturally(query)
+        
         # Step 3: Execute tools directly (not through LLM function calling)
         tool_results = execute_tools(tools_to_call)
         
@@ -286,3 +303,57 @@ def chat_hybrid(query: str) -> dict:
             "content": f"❌ Lỗi: {str(e)}",
             "tools_used": tools_used
         }
+
+
+def respond_naturally(query: str) -> dict:
+    """Respond naturally without calling any tools (for greetings, small talk)."""
+    query_lower = query.lower().strip()
+    
+    client = get_groq_client() or get_hf_client()
+    
+    if not client:
+        # Simple fallback responses
+        greetings = {
+            "hello": "👋 Chào bạn! Tôi là trợ lý ảo phân tích chứng khoán. Bạn cần tôi hỗ trợ gì?",
+            "hi": "👋 Hi! Cần tôi giúp gì về chứng khoán không?",
+            "hey": "👋 Hey! Hỏi tôi về cổ phiếu nào?",
+            "chào": "👋 Chào bạn! Cần tôi hỗ trợ phân tích gì?",
+            "xin chào": "👋 Xin chào! Bạn cần tôi giúp gì?",
+            "ôi": "👋 Ôi! Chào bạn! Cần tôi hỗ trợ gì?",
+            "alo": "👋 Alo! Cần tôi giúp gì?",
+        }
+        for key, response in greetings.items():
+            if query_lower == key or query_lower.startswith(key + " "):
+                return {"content": response, "tools_used": []}
+        return {"content": "👋 Chào bạn! Bạn cần tôi hỗ trợ gì về chứng khoán?", "tools_used": []}
+    
+    # Use LLM for natural response
+    natural_prompt = f"""Bạn là một trợ lý ảo thân thiện.
+
+User chào bạn: "{query}"
+
+Hãy trả lời một cách tự nhiên, thân thiện như con người (không phải robot).
+- Giữ ngắn gọn (1-2 câu)
+- Có thể hỏi user cần hỗ trợ gì
+- KHÔNG dùng Markdown phức tạp
+- KHÔNG liệt kê bullets hay numbered list
+- Trả lời tiếng Việt"""
+
+    try:
+        if hasattr(client, 'chat'):
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": natural_prompt}],
+                max_tokens=200,
+                temperature=0.7
+            )
+            return {"content": response.choices[0].message.content, "tools_used": []}
+        else:
+            response = client.chat_completion(
+                messages=[{"role": "user", "content": natural_prompt}],
+                max_tokens=200,
+                temperature=0.7
+            )
+            return {"content": response.choices[0].message.content or "👋 Chào bạn!", "tools_used": []}
+    except:
+        return {"content": "👋 Chào bạn! Cần tôi hỗ trợ gì về chứng khoán?", "tools_used": []}
