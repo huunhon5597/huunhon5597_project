@@ -10,7 +10,6 @@ env/
 
 # Environment
 .env
-.env.*
 
 # Streamlit
 .streamlit/secrets.toml
@@ -26,13 +25,9 @@ env/
 .DS_Store
 Thumbs.db
 
-# Cookies - DO NOT COMMIT
-*sstock_cookie.txt
-*cookie.txt
-valueinvesting.txt
-
 # Logs
 *.log
 
 # Sensitive files
 auth/vci_token.py
+.env.*
