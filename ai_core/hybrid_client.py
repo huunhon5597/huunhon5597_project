@@ -240,10 +240,6 @@ Lưu ý:
 - KHÔNG liệt kê bullet quá nhiều - viết thành đoạn văn tự nhiên"""
 
     try:
-- Nếu thiếu dữ liệu, nói rõ "Không có đủ dữ liệu để phân tích"
-- Kết quả phải TỰ NHIÊN như con người viết, KHÔNG phải dạng JSON/tool response"""
-
-    try:
         if hasattr(client, 'chat'):  # Groq client
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
