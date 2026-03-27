@@ -324,10 +324,16 @@ def investor_type(symbol="VNINDEX", frequency="Daily"):
         ]
         for buy_col, sell_col, net_col in pairs:
             df[net_col] = df[buy_col] - df[sell_col]
-        
-        # Drop Buy and Sell columns, keep only NetValue columns
-        buy_sell_cols = [col for col in df.columns if 'Buy' in col or 'Sell' in col]
-        df = df.drop(columns=buy_sell_cols)
+
+        # Calculate Total Traded Value for each type
+        df['foreignTotalTraded'] = df['foreignBuyValue'] + df['foreignSellValue']
+        df['proprietaryTotalTraded'] = df['proprietaryTotalBuyTradeValue'] + df['proprietaryTotalSellTradeValue']
+        df['domesticTotalTraded'] = (df['localIndividualBuyValue'] + df['localIndividualSellValue'] +
+                                    df['localInstitutionalBuyValue'] + df['localInstitutionalSellValue'])
+        df['foreignIndividualTotalTraded'] = df['foreignIndividualBuyTradingValue'] + df['foreignIndividualSellTradingValue']
+        df['foreignInstitutionalTotalTraded'] = df['foreignInstitutionalBuyTradingValue'] + df['foreignInstitutionalSellTradingValue']
+
+        # Keep buy/sell columns for now, don't drop them
         
         # Store in cache
         _investor_type_cache[cache_key] = df.copy()

@@ -4580,6 +4580,8 @@ elif main_menu == "Cổ phiếu":
 
 elif main_menu == "🤖 AI Chat":
     from ai_core.chat_ui import render_ai_chat
+    render_main_navigation()
+    st.markdown("---")
     render_ai_chat()
     
 elif main_menu == "Test":

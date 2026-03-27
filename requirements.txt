@@ -11,3 +11,5 @@ yfinance
 
 groq
 python-dotenv
+huggingface_hub
+openai

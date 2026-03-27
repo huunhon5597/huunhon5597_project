@@ -7,8 +7,19 @@ from ai_core.tools import AVAILABLE_TOOLS, TOOLS_SCHEMA
 
 load_dotenv()
 
+def get_secrets():
+    """Get secrets from Streamlit Cloud or .env"""
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            return st.secrets
+    except:
+        pass
+    return {}
+
 def get_groq_client():
-    api_key = os.getenv("GROQ_API_KEY")
+    secrets = get_secrets()
+    api_key = secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
     if not api_key:
         return None
     return Groq(api_key=api_key)
@@ -16,23 +27,23 @@ def get_groq_client():
 def chat_with_tools(messages, model="llama-3.3-70b-versatile"):
     """
     Tiếp nhận list dictionary `messages` (role: user/assistant/tool, content: text...).
-    Xử lý vòng lặp gọi Tool của LLM cho đến khi hoàn tất hoặc tối đa 3 vòng lặp.
+    Xử lý vòng lặp gọi Tool của LLM cho đến khi hoàn tất hoặc tối đa 10 vòng lặp.
     """
     client = get_groq_client()
     if not client:
         return {"error": "GROQ_API_KEY chưa được cấu hình trong file .env."}
     
     tools_used = []
-    max_loops = 3
+    max_loops = 10
     loops = 0
     
     try:
         while loops < max_loops:
-            # Always pass tools for function calling
+            # Pass all tools - Groq can handle them
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                tools=TOOLS_SCHEMA[:2],  # Only 2 essential tools
+                tools=TOOLS_SCHEMA,  # Use all 9 tools
                 tool_choice="auto",
                 max_tokens=4096,
             )
