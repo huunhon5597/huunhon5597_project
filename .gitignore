@@ -26,8 +26,10 @@ env/
 .DS_Store
 Thumbs.db
 
-# Cookies (uncomment if you don't want to commit cookies)
-# sstock_cookie.txt
+# Cookies - DO NOT COMMIT
+*sstock_cookie.txt
+*cookie.txt
+valueinvesting.txt
 
 # Logs
 *.log
