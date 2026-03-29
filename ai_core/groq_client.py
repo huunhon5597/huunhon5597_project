@@ -28,6 +28,8 @@ def chat_with_tools(messages, model="llama-3.3-70b-versatile"):
     """
     Tiếp nhận list dictionary `messages` (role: user/assistant/tool, content: text...).
     Xử lý vòng lặp gọi Tool của LLM cho đến khi hoàn tất hoặc tối đa 10 vòng lặp.
+    
+    Lưu ý: messages đã bao gồm full chat history từ session state.
     """
     client = get_groq_client()
     if not client:

@@ -88,7 +88,7 @@ def render_ai_chat():
                     # Pass toàn bộ memory context to the agent
                     # Use selected AI
                     if "Hybrid" in selected_ai:
-                        result = chat_hybrid(prompt)
+                        result = chat_hybrid(prompt, st.session_state.ai_chat_messages)
                     elif "HuggingFace" in selected_ai:
                         result = chat_with_hf(st.session_state.ai_chat_messages)
                     else:

@@ -133,10 +133,83 @@ def extract_symbols_from_query(query: str) -> list:
     
     return found_symbols
 
+def extract_timeframe_from_query(query: str) -> int:
+    """Extract timeframe from user query if specified."""
+    from datetime import datetime
+    
+    query_lower = query.lower()
+    now = datetime.now()
+    current_year = now.year
+    current_month = now.month
+    current_quarter = (current_month - 1) // 3 + 1
+    
+    # Check for specific timeframes with exact days
+    time_patterns = [
+        (["1 tháng", "1m", "tháng"], 30),
+        (["3 tháng", "3m", "quý"], 90),
+        (["6 tháng", "6m", "nửa năm"], 180),
+        (["1 năm", "1y", "một năm", "năm nay"], 365),
+        (["2 năm", "2y", "hai năm"], 730),
+        (["5 năm", "5y", "năm năm"], 1825),
+        (["10 năm", "10y", "mười năm"], 3650),
+    ]
+    
+    # First check exact keyword matches
+    for keywords, days in time_patterns:
+        for kw in keywords:
+            if kw in query_lower:
+                return days
+    
+    # Calculate days from start of period to now
+    # "từ đầu năm" / "đầu năm nay" / "năm nay tính từ đầu"
+    if "đầu năm" in query_lower or ("từ đầu năm" in query_lower) or "tính từ đầu năm" in query_lower:
+        return (now - datetime(current_year, 1, 1)).days
+    
+    # "từ đầu quý" / "quý này"
+    if "đầu quý" in query_lower:
+        quarter_start_month = (current_quarter - 1) * 3 + 1
+        return (now - datetime(current_year, quarter_start_month, 1)).days
+    
+    # "từ đầu tháng" / "tháng này"
+    if "đầu tháng" in query_lower or "tháng này" in query_lower:
+        return (now - datetime(current_year, current_month, 1)).days
+    
+    # "tuần này"
+    if "tuần này" in query_lower:
+        return now.weekday()  # Days since start of week (Monday)
+    
+    # "hôm nay" / "hôm nay
+    if "hôm nay" in query_lower:
+        return 1
+    
+    # "tuần trước"
+    if "tuần trước" in query_lower:
+        return now.weekday() + 7
+    
+    # "tháng trước"
+    if "tháng trước" in query_lower:
+        if current_month == 1:
+            return (now - datetime(current_year - 1, 12, 1)).days
+        return (now - datetime(current_year, current_month - 1, 1)).days
+    
+    # "quý trước"
+    if "quý trước" in query_lower:
+        if current_quarter == 1:
+            return (now - datetime(current_year - 1, 10, 1)).days
+        quarter_start_month = (current_quarter - 2) * 3 + 1
+        return (now - datetime(current_year, quarter_start_month, 1)).days
+    
+    # "năm ngoái" / "năm trước"
+    if "năm ngoái" in query_lower or "năm trước" in query_lower:
+        return 365 + (now - datetime(current_year - 1, 1, 1)).days
+    
+    return 180  # Default
+
 def determine_tools_needed(query: str, symbols: list) -> list:
     """Determine which tools to call based on query and symbols."""
     query_lower = query.lower().strip()
     tools_to_call = []
+    days = extract_timeframe_from_query(query)
     
     # Check for simple greeting - don't call any tools
     simple_greetings = ["hello", "hi", "hey", "chào", "xin chào", "ôi", "alo", "hi there", "xin chao"]
@@ -157,10 +230,10 @@ def determine_tools_needed(query: str, symbols: list) -> list:
     has_price = any(word in query_lower for word in ["giá", "price"])
     
     if has_market or (not symbols and not has_sentiment and not has_investor and not has_valuation):
-        tools_to_call.append(("menu_market_overview", {"days": 180}))
+        tools_to_call.append(("menu_market_overview", {"days": days}))
     
     if has_sentiment:
-        tools_to_call.append(("tool_market_sentiment_full", {"days": 180}))
+        tools_to_call.append(("tool_market_sentiment_full", {"days": days}))
     
     if has_investor:
         for sym in symbols if symbols else ["VNINDEX"]:
@@ -168,7 +241,7 @@ def determine_tools_needed(query: str, symbols: list) -> list:
     
     if has_valuation:
         for sym in symbols if symbols else ["VNINDEX"]:
-            tools_to_call.append(("tool_valuation", {"symbol": sym, "days": 365}))
+            tools_to_call.append(("tool_valuation", {"symbol": sym, "days": days}))
     
     if has_price and symbols:
         for sym in symbols:
@@ -176,19 +249,19 @@ def determine_tools_needed(query: str, symbols: list) -> list:
     
     if has_stock and symbols:
         for sym in symbols:
-            tools_to_call.append(("menu_stock_analysis", {"symbol": sym, "days": 180}))
+            tools_to_call.append(("menu_stock_analysis", {"symbol": sym, "days": days}))
     
     if has_recommend:
         for sym in symbols if symbols else ["VNINDEX"]:
             query_type = "stock" if sym != "VNINDEX" else "market"
-            tools_to_call.append(("tool_recommendation", {"query_type": query_type, "symbol": sym, "days": 180}))
+            tools_to_call.append(("tool_recommendation", {"query_type": query_type, "symbol": sym, "days": days}))
     
     if not tools_to_call:
         if symbols:
             for sym in symbols:
-                tools_to_call.append(("menu_stock_analysis", {"symbol": sym, "days": 180}))
+                tools_to_call.append(("menu_stock_analysis", {"symbol": sym, "days": days}))
         else:
-            tools_to_call.append(("menu_market_overview", {"days": 180}))
+            tools_to_call.append(("menu_market_overview", {"days": days}))
     
     return tools_to_call
 
@@ -208,7 +281,7 @@ def execute_tools(tools_to_call: list) -> str:
     
     return "\n".join(results)
 
-def synthesize_with_llm(query: str, tool_results: str) -> str:
+def synthesize_with_llm(query: str, tool_results: str, chat_history: list = None) -> str:
     """Use LLM to synthesize tool results and add external knowledge."""
     
     client = get_groq_client() or get_hf_client()
@@ -216,22 +289,39 @@ def synthesize_with_llm(query: str, tool_results: str) -> str:
     if not client:
         return tool_results + "\n\n⚠️ Không có LLM available để tổng hợp. Đây là kết quả trực tiếp từ tools."
     
+    # Build conversation context from history
+    history_text = ""
+    if chat_history:
+        for msg in chat_history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "user":
+                history_text += f"User hỏi: {content}\n"
+            elif role == "assistant":
+                history_text += f"AI trả lời: {content}\n"
+    
     synthesis_prompt = f"""Bạn là một chuyên gia phân tích chứng khoán đang tư vấn trực tiếp cho khách hàng qua chat.
+
+Dưới đây là LỊCH SỬ CUỘC TRÒ CHUYỆN trước đó:
+---
+{history_text}
+---
 
 Dưới đây là DỮ LIỆU PHÂN TÍCH từ hệ thống:
 ---
 {tool_results}
 ---
 
-User hỏi: {query}
+User hỏi hiện tại: {query}
 
 NHIỆM VỤ VIẾT:
-1. Đọc dữ liệu trên và phân tích ngắn gọn cho user
-2. Viết NHƯ CON NGƯỜI - không phải robot hay báo cáo formal
-3. Dùng ngôn ngữ tự nhiên, có thể dùng emoji nhẹ 📈📉
-4. Có thể thêm 1-2 câu về bối cảnh kinh tế nếu thấy phù hợp
-5. Nếu user hỏi về cổ phiếu cụ thể → tập trung vào cổ phiếu đó
-6. Nếu user hỏi về thị trường → tập trung vào xu hướng chung
+1. Đọc lịch sử cuộc trò chuyện để hiểu ngữ cảnh (user đang hỏi về gì, đã hỏi những gì trước đó)
+2. Đọc dữ liệu trên và phân tích ngắn gọn cho user
+3. Viết NHƯ CON NGƯỜI - không phải robot hay báo cáo formal
+4. Dùng ngôn ngữ tự nhiên, có thể dùng emoji nhẹ 📈📉
+5. Có thể thêm 1-2 câu về bối cảnh kinh tế nếu thấy phù hợp
+6. Nếu user hỏi về cổ phiếu cụ thể → tập trung vào cổ phiếu đó
+7. Nếu user hỏi tiếp về chủ đề trước đó → nhắc lại/tham chiếu đến câu hỏi trước
 
 Lưu ý:
 - KHÔNG bịa đặt số liệu - chỉ dùng data từ kết quả tools
@@ -259,12 +349,13 @@ Lưu ý:
         return tool_results + f"\n\n⚠️ Lỗi khi tổng hợp với LLM: {str(e)}\n\nĐây là kết quả trực tiếp từ tools."
 
 
-def chat_hybrid(query: str) -> dict:
+def chat_hybrid(query: str, chat_history: list = None) -> dict:
     """
     Main function for hybrid chat - directly call tools + use LLM to synthesize.
     
     Args:
         query: User's question/prompt
+        chat_history: Optional list of previous messages for context
         
     Returns:
         dict with "content" and "tools_used" keys
@@ -286,8 +377,8 @@ def chat_hybrid(query: str) -> dict:
         # Step 3: Execute tools directly (not through LLM function calling)
         tool_results = execute_tools(tools_to_call)
         
-        # Step 4: Use LLM to synthesize results + add external knowledge
-        final_response = synthesize_with_llm(query, tool_results)
+        # Step 4: Use LLM to synthesize results + add external knowledge (with context)
+        final_response = synthesize_with_llm(query, tool_results, chat_history)
         
         return {
             "content": final_response,
