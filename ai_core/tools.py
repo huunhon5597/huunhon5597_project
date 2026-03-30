@@ -21,7 +21,8 @@ TOOLS DESIGN:
 
 import json
 import pandas as pd
-from stock_data.stock_data import get_stock_history, get_stock_symbols, investor_type
+import requests
+from stock_data.stock_data import get_stock_history, get_stock_symbols, investor_type, market_margin
 from market_sentiment.sentiment import (
     sentiment, volatility, high_low_index, 
     bpi, ma, market_breadth

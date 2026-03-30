@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 import json
+import os
 from datetime import datetime
 import time
 
@@ -342,4 +343,72 @@ def investor_type(symbol="VNINDEX", frequency="Daily"):
         return df
     except Exception as e:
         print(f"Error parsing response: {e}")
+        return pd.DataFrame()
+
+
+def market_margin(quarter: int = 4) -> pd.DataFrame:
+    """
+    Lấy dữ liệu margin (margin ratio) của thị trường chứng khoán Việt Nam từ sstock.
+
+    Args:
+        quarter: Số quý cần lấy. Mặc định là 4 (4 quý gần nhất).
+
+    Returns:
+        pd.DataFrame: DataFrame chứa dữ liệu margin, mỗi dòng là một quý.
+    """
+    session = _get_session()
+
+    cookies = None
+    possible_paths = [
+        "sstock_cookie.txt",
+        os.path.join(os.path.dirname(__file__), "..", "sstock_cookie.txt"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "sstock_cookie.txt"),
+    ]
+
+    for cookie_path in possible_paths:
+        try:
+            if os.path.exists(cookie_path):
+                with open(cookie_path, "r") as f:
+                    cookies = f.read().strip()
+                break
+        except Exception:
+            continue
+
+    if not cookies:
+        print(f"Warning: Cookie file not found in any of: {possible_paths}")
+        return pd.DataFrame()
+
+    headers = {
+        'accept': '*/*',
+        'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ko;q=0.7,fr;q=0.6,zh-TW;q=0.5,zh;q=0.4',
+        'origin': 'https://sstock.vn',
+        'priority': 'u=1, i',
+        'referer': 'https://sstock.vn/',
+        'sec-ch-ua': '"Not(A:Brand";v="8", "Chromium";v="144", "Opera GX";v="128"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 OPR/128.0.0.0 (Edition globalgames-sd)',
+        'Cookie': cookies
+    }
+
+    url = "https://api-feature.sstock.vn/api/v1/market/whole-market-margin"
+
+    try:
+        response = session.get(url, headers=headers, timeout=15)
+        response = response.json()
+        df = pd.DataFrame(response['data'])
+
+        time_data = df.iloc[:, 0].apply(lambda x: pd.to_datetime(x[0], unit='ms'))
+        df.insert(0, 'time', time_data)
+
+        for col in df.columns[1:]:
+            df[col] = df[col].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+        df = df.sort_values('time', ascending=True).reset_index(drop=True)
+
+        return df.tail(quarter).reset_index(drop=True)
+    except Exception as e:
+        print(f"Error fetching market margin data: {e}")
         return pd.DataFrame()

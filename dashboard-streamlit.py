@@ -796,6 +796,101 @@ def render_breadth_fragment(bread_key, start_date_str, end_date_str):
             st.info("Đang tải dữ liệu độ rộng thị trường tự động (mặc định 6 tháng)...")
 
 
+@st.fragment
+def render_margin_fragment(margin_key, num_quarters):
+    """Fragment to render Margin chart independently."""
+    from stock_data.stock_data import market_margin
+    
+    with st.container():
+        status, data = get_job_status(margin_key)
+
+        if status == "running":
+            st.info("Đang tải dữ liệu margin...")
+        elif status == "error":
+            st.error(f"Lỗi khi tải dữ liệu margin: {data}")
+        elif status == "completed" and data is not None and not data.empty:
+            import pandas as pd
+            import plotly.graph_objects as go
+            
+            data['time'] = pd.to_datetime(data['time'])
+            
+            fig_margin = go.Figure()
+            
+            # Use index as x-axis
+            x_data = list(range(len(data)))
+            
+            # Get values with correct mapping:
+            # - vcsh: Vốn chủ sở hữu (~300k tỷ) - blue bar
+            # - margin: Margin (%) (~100) - orange line
+            # - tongChoVay: Tổng cho vay (~280k tỷ) - red bar
+            vcsh_values = data['vcsh'].astype(float).tolist()
+            margin_values = data['margin'].astype(float).tolist()  # This is actually Margin (%)
+            tongChoVay_values = data['tongChoVay'].astype(float).tolist()
+            
+            # Add bar for vcsh - blue
+            fig_margin.add_trace(go.Bar(
+                x=x_data, y=vcsh_values, name='Vốn chủ sở hữu (VCSH)',
+                marker_color='rgba(52, 152, 219, 0.8)'
+            ))
+            
+            # Add bar for tongChoVay - red
+            fig_margin.add_trace(go.Bar(
+                x=x_data, y=tongChoVay_values, name='Tổng cho vay',
+                marker_color='rgba(231, 76, 60, 0.8)'
+            ))
+            
+            # Add line trace for margin - orange on right Y-axis
+            fig_margin.add_trace(go.Scatter(
+                x=x_data, y=margin_values, name='Margin (%)', mode='lines+markers',
+                line=dict(color='#f39c12', width=3), yaxis='y2'
+            ))
+            
+            # Format x-axis with quarter labels
+            x_labels = data['time'].dt.strftime('Q%q\n%Y').tolist()
+            
+            fig_margin.update_layout(
+                title='📐 Margin Thị trường Chứng Khoán Việt Nam',
+                xaxis_title='Thời gian (Quý)',
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=x_data,
+                    ticktext=x_labels
+                ),
+                yaxis=dict(
+                    title='Giá trị (Tỷ VNĐ)', 
+                    side='left', 
+                    showgrid=True, 
+                    gridcolor='rgba(128,128,128,0.2)'
+                ),
+                yaxis2=dict(
+                    title='Margin (%)',
+                    side='right', 
+                    overlaying='y', 
+                    showgrid=False,
+                    tickformat='.1f'
+                ),
+                height=450, hovermode='x unified',
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+                barmode='group',
+                margin=dict(l=50, r=50, t=60, b=50)
+            )
+            fig_margin.update_xaxes(showgrid=False, zeroline=False)
+            st.plotly_chart(fig_margin, width='stretch')
+            
+            if f"{margin_key}_start_time" in st.session_state:
+                loading_time_key = f"{margin_key}_loading_time"
+                if loading_time_key not in st.session_state:
+                    st.session_state[loading_time_key] = time.time() - st.session_state[f"{margin_key}_start_time"]
+                st.caption(f"⏱️ Thời gian tải biểu đồ: {st.session_state[loading_time_key]:.2f} giây")
+            
+            # Show data details
+            with st.expander("📊 Xem dữ liệu Margin chi tiết"):
+                st.dataframe(data, width='stretch')
+                st.download_button("Tải xuống dữ liệu CSV", data.to_csv(index=False), f"margin_{num_quarters}_quarters.csv", "text/csv")
+        else:
+            st.info("Đang tải dữ liệu margin tự động...")
+
+
 # --- Navigation: default blank page. Main menus: Trang trống, Thị trường, Định giá ---
 
 def clear_content_on_menu_change():
@@ -1258,7 +1353,7 @@ elif main_menu == "Thị trường":
     
     # Submenu navigation buttons for Thị trường
     st.subheader("📊 Submenu")
-    submenu_cols = st.columns(2)
+    submenu_cols = st.columns(3)
     with submenu_cols[0]:
         if st.button("🧠 Tâm lý thị trường", key="subnav_thi_truong_tam_ly"):
             st.session_state.thi_truong_submenu = "Tâm lý thị trường"
@@ -1267,13 +1362,17 @@ elif main_menu == "Thị trường":
         if st.button("👥 Phân loại nhà đầu tư", key="subnav_thi_truong_phan_loai"):
             st.session_state.thi_truong_submenu = "Phân loại nhà đầu tư"
             st.rerun()
+    with submenu_cols[2]:
+        if st.button("📐 Margin", key="subnav_thi_truong_margin"):
+            st.session_state.thi_truong_submenu = "Margin"
+            st.rerun()
     
     st.markdown("---")
     
     # Submenu for Thị trường - with placeholder option
     thi_truong_submenu = st.sidebar.selectbox(
         "Chọn submenu", 
-        ["-- Chọn --", "Tâm lý thị trường", "Phân loại nhà đầu tư"], 
+        ["-- Chọn --", "Tâm lý thị trường", "Phân loại nhà đầu tư", "Margin"], 
         key="thi_truong_submenu"
     )
     
@@ -2312,6 +2411,47 @@ elif main_menu == "Thị trường":
                     st.warning("Không có dữ liệu Khối ngoại ròng.")
             else:
                 st.info("Đang tải dữ liệu...")
+
+    elif thi_truong_submenu == "Margin":
+        from stock_data.stock_data import market_margin
+        
+        st.subheader("📐 Margin Thị trường")
+        
+        # Period selection - number of quarters (default 4 = 1 year)
+        margin_col1, margin_col2 = st.columns([3, 1])
+        
+        with margin_col1:
+            num_quarters = st.selectbox(
+                "Chọn số quý",
+                ["1 quý", "2 quý", "3 quý", "4 quý (1 năm)", "5 quý", "6 quý (1.5 năm)", "7 quý", "8 quý (2 năm)"],
+                index=3,
+                key="margin_num_quarters"
+            )
+            
+            # Map selection to number
+            quarter_map = {
+                "1 quý": 1, "2 quý": 2, "3 quý": 3, "4 quý (1 năm)": 4,
+                "5 quý": 5, "6 quý (1.5 năm)": 6, "7 quý": 7, "8 quý (2 năm)": 8
+            }
+            selected_quarters = quarter_map.get(num_quarters, 4)
+        
+        with margin_col2:
+            st.caption(f"📅 Q{((datetime.now().month-1)//3)+1}/{datetime.now().year}")
+        
+        # Create cache key based on number of quarters
+        margin_key = f"margin_data_{selected_quarters}"
+        
+        # Auto-load data
+        # Submit jobs if not already in session_state or jobs
+        if margin_key not in st.session_state and margin_key not in st.session_state.jobs:
+            st.session_state.jobs[margin_key] = st.session_state.executor.submit(
+                market_margin,
+                quarter=selected_quarters
+            )
+            st.session_state[f"{margin_key}_start_time"] = time.time()
+        
+        # Render the margin chart
+        render_margin_fragment(margin_key, selected_quarters)
 
 elif main_menu == "Cổ phiếu":
     st.header("💹 Cổ phiếu")

@@ -10,11 +10,15 @@ This module provides functions for retrieving stock data including:
 from .stock_data import (
     get_stock_history,
     get_stock_symbols,
-    get_listing_date
+    get_listing_date,
+    investor_type,
+    market_margin
 )
 
 __all__ = [
     "get_stock_history",
     "get_stock_symbols", 
-    "get_listing_date"
+    "get_listing_date",
+    "investor_type",
+    "market_margin"
 ]
