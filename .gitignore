@@ -31,3 +31,6 @@ Thumbs.db
 # Sensitive files
 auth/vci_token.py
 .env.*
+
+# Backup files
+dashboard-backup.py
