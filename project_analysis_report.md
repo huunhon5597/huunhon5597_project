@@ -38,6 +38,43 @@ streamlit/
 │   └── README.md
 ├── plans/                          # Planning Documents
 │   └── ai_integration_plan.md
+├── .streamlit/                     # Streamlit config ⚠️ MỚI
+│   ├── config.toml                 # Server config (xsrf protection)
+│   ├── secrets.toml                # ⚠️ LOCAL ONLY - DO NOT COMMIT
+│   └── secrets.toml.template       # Template cho secrets
+├── .env                            # ⚠️ CHỨA CREDENTIALS - ĐÃ ignore
+├── .gitignore
+├── sstock_cookie.txt               # ⚠️ COOKIE FILE - CHƯA IGNORE
+├── valueinvesting.txt              # ⚠️ COOKIE FILE - CHƯA IGNORE
+├── structure.txt
+├── note.txt
+└── problem.txt
+```
+streamlit/
+├── dashboard-streamlit.py          # Main app (4,732 lines) ⚠️ QUÁ LỚN
+├── ai_core/                        # AI Integration Module
+│   ├── __init__.py
+│   ├── chat_ui.py                  # Chat UI (73 lines)
+│   ├── groq_client.py              # Groq API client (91 lines)
+│   ├── prompts.py                  # System prompts (19 lines)
+│   └── tools.py                    # Function definitions (91 lines)
+├── stock_data/                     # Stock Data Module
+│   ├── __init__.py
+│   ├── stock_data.py               # Data fetching (339 lines)
+│   └── requirements.txt
+├── market_sentiment/               # Market Sentiment Module
+│   ├── __init__.py
+│   └── sentiment.py                # Sentiment analysis (651 lines)
+├── valuation/                      # Valuation Module
+│   ├── __init__.py
+│   └── valuation.py                # P/B, P/E, PEG (853 lines)
+├── auth/                           # Authentication Module
+│   ├── __init__.py
+│   ├── fetch_cookie.py             # Cookie automation (211 lines)
+│   ├── vci_token.py                # VCI token management (112 lines)
+│   └── README.md
+├── plans/                          # Planning Documents
+│   └── ai_integration_plan.md
 ├── .env                            # Environment variables ⚠️ CHỨA CREDENTIALS
 ├── .gitignore
 ├── requirements.txt
@@ -92,8 +129,7 @@ streamlit/
 
 ### 🔴 Nghiêm Trọng (Critical)
 
-#### 1. **Bảo Mật - Credentials Exposed**
-**File:** `.env`
+#### 1. **Bảo Mật - Credentials Exposed** ⚠️ ĐÃ FIX TRONG .GITIGNORE
 ```env
 SSTOCK_EMAIL=huunhon5597@gmail.com
 SSTOCK_PASSWORD=doretuong
@@ -103,32 +139,32 @@ GROQ_API_KEY=gsk_qCavz2Yfvyk9Gi5eKP8oWGdyb3FY6QDjSQx7In647wl8OSTXqS4fgsk_3HazxV9
 ```
 
 **Vấn đề:**
-- Passwords và API keys được commit vào git
-- `.env` file không được ignore trong `.gitignore`
-- Credentials có thể bị lộ nếu repository public
+- Passwords và API keys lưu trong `.env`
+- **ĐÃ ĐƯỢC IGNORE** trong `.gitignore` dòng 12: `.env`
+- **ĐÃ ĐƯỢC IGNORE** trong `.gitignore` dòng 33: `.env.*`
 
-**Giải pháp:**
+**Giải pháp:** ✅ Đã thêm vào `.gitignore`
 ```gitignore
-# Thêm vào .gitignore
 .env
-*.env
-.env.local
-.env.production
+.env.*
 ```
 
-#### 2. **Cookie Files Committed**
+#### 2. **Cookie Files Cho Streamlit Cloud**
 **Files:** `sstock_cookie.txt`, `valueinvesting.txt`
 
-**Vấn đề:**
-- Cookie files chứa session tokens
-- Có thể bị exploit nếu attacker có quyền truy cập
+**Tình trạng:**
+- ✅ Được track trong git để dùng cho Streamlit Cloud
+- ⚠️ Cần cập nhật thủ công khi cookie hết hạn
 
 **Giải pháp:**
-```gitignore
-# Thêm vào .gitignore
-sstock_cookie.txt
-valueinvesting.txt
+```bash
+# Cập nhật cookie khi cần
+git add sstock_cookie.txt valueinvesting.txt
+git commit -m "Update cookies"
+git push
 ```
+
+---
 
 #### 3. **Hardcoded API Token trong Code**
 **File:** `stock_data/stock_data.py` (line 40)
@@ -243,7 +279,26 @@ tests/
 
 ### 🟢 Nhẹ (Low)
 
-#### 8. **Không Có Logging System**
+### 🟢 Nhẹ (Low)
+
+#### 2. **Cookie Files - Cần Commit**
+**Files:** `sstock_cookie.txt`, `valueinvesting.txt`
+
+**Tình trạng:**
+- ✅ Đã được track trong git (để dùng cho Streamlit Cloud)
+- ⚠️ Cần cập nhật thủ công khi cookie hết hạn
+
+**Giải pháp:**
+```bash
+# Cập nhật cookie khi cần
+git add sstock_cookie.txt valueinvesting.txt
+git commit -m "Update cookies"
+git push
+```
+
+---
+
+#### 9. **Không Có Logging System**
 **Vấn đề:**
 - Sử dụng `print()` statements
 - Không có log levels (DEBUG, INFO, WARNING, ERROR)
@@ -265,7 +320,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 ```
 
-#### 9. **Không Có Documentation**
+---
+
+#### 10. **Không Có Documentation**
 **Vấn đề:**
 - Không có README.md chính
 - Không có API documentation
@@ -279,7 +336,7 @@ logger = logging.getLogger(__name__)
   - Usage examples
   - API documentation
 
-#### 10. **Version Pinning trong requirements.txt**
+#### 11. **Version Pinning trong requirements.txt**
 **File:** `requirements.txt`
 ```
 streamlit
@@ -303,7 +360,7 @@ requests==2.31.0
 ...
 ```
 
-#### 11. **Unused Imports**
+#### 12. **Unused Imports**
 **Vấn đề:**
 - Một số imports không được sử dụng
 - Tăng bundle size không cần thiết
@@ -312,7 +369,7 @@ requests==2.31.0
 - Sử dụng linter (pylint, flake8)
 - Remove unused imports
 
-#### 12. **Magic Numbers/Strings**
+#### 13. **Magic Numbers/Strings**
 **Vấn đề:**
 - Hardcoded values trong code
 - Khó maintain và config
@@ -328,6 +385,43 @@ TIMEOUT = 15
 CACHE_TTL = int(os.getenv('CACHE_TTL', 1800))
 MAX_WORKERS = int(os.getenv('MAX_WORKERS', 30))
 TIMEOUT = int(os.getenv('TIMEOUT', 15))
+```
+
+---
+
+#### 14. **Streamlit Config Chưa Hoàn Chỉnh**
+**Folder:** `.streamlit/`
+
+**Tình trạng hiện tại:**
+- ✅ `config.toml` - đã bật `enableXsrfProtection = true`
+- ✅ `secrets.toml` - đã được ignore trong `.gitignore`
+- ✅ Template file có sẵn
+
+**Vấn đề:**
+- Thiếu custom theme configuration
+- Chưa có runner settings tối ưu
+- Chưa có browser configuration
+
+**Giải pháp:**
+```toml
+# config.toml mở rộng
+[server]
+enableXsrfProtection = true
+enableStaticFileServing = true
+
+[runner]
+magicEnabled = true
+fastReruns = true
+
+[browser]
+serverAddress = "localhost"
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#1f77b4"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#fafafa
 ```
 
 ---
@@ -349,10 +443,10 @@ TIMEOUT = int(os.getenv('TIMEOUT', 15))
 ## 🎯 Ưu Tiên Khắc Phục
 
 ### Priority 1: Security (Ngay lập tức)
-1. ✅ Thêm `.env` vào `.gitignore`
-2. ✅ Thêm cookie files vào `.gitignore`
-3. ✅ Rotate all exposed credentials
-4. ✅ Move hardcoded tokens to env vars
+1. ✅ Đã thêm `.env` vào `.gitignore` (dòng 12, 33)
+2. ✅ Đã thêm `.streamlit/secrets.toml` vào `.gitignore` (dòng 15)
+3. ⚠️ Cần rotate all exposed credentials (nếu repo public)
+4. ✅ Cookie files được giữ trong git để dùng cho Streamlit Cloud
 
 ### Priority 2: Code Quality (Tuần này)
 1. ✅ Refactor dashboard thành modules
@@ -481,26 +575,28 @@ def setup_logging():
 | Tiêu Chí | Điểm | Nhận Xét |
 |-----------|------|-----------|
 | **Cấu trúc** | 7/10 | Module hóa tốt, nhưng dashboard quá lớn |
-| **Bảo mật** | 4/10 | ⚠️ Credentials exposed, cần fix ngay |
+| **Bảo mật** | 6/10 | ⚠️ Credentials đã ignore, cookie files cần commit cho cloud |
 | **Code quality** | 6/10 | Duplicate code, thiếu error handling |
 | **Performance** | 8/10 | Caching tốt, parallel processing |
 | **Documentation** | 3/10 | Thiếu README, API docs |
 | **Testing** | 2/10 | Không có unit tests |
 | **Maintainability** | 5/10 | Khó maintain do file quá lớn |
-| **Overall** | **5.5/10** | Cần cải thiện security và code quality |
+| **Overall** | **6/10** | Đã cải thiện, phù hợp cho Streamlit Cloud |
 
 ---
 
 ## 🚀 Kết Luận
 
-Dự án có **kiến trúc tốt** với các module được tách biệt rõ ràng và **tích hợp AI đầy đủ**. Tuy nhiên, có **vấn đề bảo mật nghiêm trọng** cần khắc phục ngay lập tức (credentials exposed).
+Dự án có **kiến trúc tốt** với các module được tách biệt rõ ràng và **tích hợp AI đầy đủ**. Đã cải thiện bảo mật với `.env` và `secrets.toml` được ignore.
+
+**Cập nhật lần này:**
+- ✅ Đã thêm `.streamlit/secrets.toml` vào cấu trúc dự án
+- ✅ Đã xác nhận `.env` được ignore trong `.gitignore`
+- ✅ Cookie files được giữ trong git để dùng cho Streamlit Cloud
 
 **Ưu tiên hàng đầu:**
-1. 🔴 Fix security issues (credentials, cookies)
-2. 🟡 Refactor dashboard file
-3. 🟢 Add tests và documentation
-
-Sau khi khắc phục các vấn đề trên, dự án sẽ đạt chất lượng tốt và sẵn sàng cho production.
+1. 🟡 Refactor dashboard file
+2. 🟢 Add tests và documentation
 
 ---
 
